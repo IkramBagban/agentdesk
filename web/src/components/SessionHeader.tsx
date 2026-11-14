@@ -39,7 +39,7 @@ export function SessionHeader({ sessionId, view, onToggleSidebar, sidebarShown }
         onChange={(v) => navigate({ view: v }, { replace: true })}
         options={[
           { value: 'conversation', label: <><span className="sm:hidden">Chat</span><span className="max-sm:hidden">Conversation</span></>, title: 'Prompts, replies and summarised work' },
-          { value: 'all', label: 'Everything', title: 'Also show background records the app added' },
+          { value: 'all', label: <><span className="sm:hidden">All</span><span className="max-sm:hidden">Everything</span></>, title: 'Also show background records the app added' },
         ]}
       />
       {s && (

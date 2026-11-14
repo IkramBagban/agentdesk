@@ -386,7 +386,7 @@ function Prompt({ event, ctx, highlight, showInjected, fromAgent }: { event: Cha
   const other = event.blocks.filter((b) => b.type !== 'text' && b.type !== 'image' && b.type !== 'document' && !(b.type === 'notice' && b.kind === 'injected'));
   const hasText = event.blocks.some((b) => b.type === 'text' && b.text.trim());
   return (
-    <div id={`seq-${event.seq}`} className={`group/msg flex flex-col items-end pt-5 pb-3 ${event.offBranch ? 'opacity-55' : ''} ${highlightCls(highlight)}`}>
+    <div id={`seq-${event.seq}`} className={`group/msg flex flex-col items-end pt-4 pb-1 ${event.offBranch ? 'opacity-55' : ''} ${highlightCls(highlight)}`}>
       {event.offBranch && <OffBranch />}
       {fromAgent && <div className="mb-1.5 text-[11.5px] font-medium text-faint">Instructions from the main agent</div>}
       {images.length > 0 && (
@@ -464,7 +464,7 @@ function Reply({ event, ctx, highlight, endOfTurn }: { event: ChatEvent; ctx: Bl
 
 function Activity({ row, ctxBase, defaultOpen }: { row: Extract<Row, { kind: 'activity' }>; ctxBase: Omit<BlockCtx, 'seq'>; defaultOpen: boolean }) {
   const [open, setOpen] = useState(defaultOpen);
-  const s = useMemo(() => summarize(row.events), [row.events]);
+  const s = useMemo(() => summarize(row.events, row.results), [row.events, row.results]);
   const firstTool = useMemo(() => {
     for (const e of row.events) for (const b of e.blocks) if (b.type === 'tool_use') return b.name;
     return undefined;
@@ -472,13 +472,6 @@ function Activity({ row, ctxBase, defaultOpen }: { row: Extract<Row, { kind: 'ac
   const Icon = firstTool ? kindIcon(firstTool) : Brain;
   const onlyMeta = s.calls === 0 && s.thinking === 0;
   const dur = row.durationMs != null && row.durationMs >= 2000 ? duration(row.durationMs) : undefined;
-
-  // A tool_use's result is shown under the call; don't render it twice.
-  const paired = useMemo(() => {
-    const ids = new Set<string>();
-    for (const e of row.events) for (const b of e.blocks) if (b.type === 'tool_use' && row.results.has(b.id)) ids.add(b.id);
-    return ids;
-  }, [row]);
 
   return (
     <div className="py-1">
@@ -510,7 +503,7 @@ function Activity({ row, ctxBase, defaultOpen }: { row: Extract<Row, { kind: 'ac
         <div className="mt-1.5 mb-2 overflow-hidden rounded-xl border border-line">
           {row.events.map((e) =>
             e.blocks
-              .filter((b) => !(b.type === 'tool_result' && paired.has(b.toolUseId)) && !((b.type === 'thinking' || b.type === 'text') && !b.text.trim()))
+              .filter((b) => !((b.type === 'thinking' || b.type === 'text') && !b.text.trim()))
               .map((b, i) => {
                 const padded = b.type !== 'tool_use' && b.type !== 'thinking' && b.type !== 'tool_result';
                 return (

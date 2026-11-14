@@ -27,7 +27,7 @@ import {
 } from 'lucide-react';
 import { api, type Block, type ImageBlock, type ToolResultBlock, type ToolUseBlock } from '../api.ts';
 import { basename, bytes, tildify, toolName } from '../format.ts';
-import { commandOf, describeCall, diffLines, editsOf, filePathOf, langOf, lineStats, patchOf, serverLabel, toolKind, type ToolKind } from '../tools.ts';
+import { commandOf, describeCall, scriptOf, diffLines, editsOf, filePathOf, langOf, lineStats, patchOf, serverLabel, toolKind, type ToolKind } from '../tools.ts';
 import { CodeBlock, Markdown } from './Markdown.tsx';
 import { useLightbox } from './Lightbox.tsx';
 import { CopyButton } from './ui.tsx';
@@ -362,6 +362,15 @@ function CallDetail({ block, result, ctx }: { block: ToolUseBlock; result?: Tool
 
   switch (kind) {
     case 'command': {
+      const script = scriptOf(block);
+      if (script)
+        return (
+          <>
+            <CodeBlock code={script} lang="js" />
+            {output}
+            {extras}
+          </>
+        );
       const cmd = commandOf(block) ?? '';
       return (
         <>

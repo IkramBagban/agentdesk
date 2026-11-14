@@ -1,4 +1,4 @@
-import type { ChatEvent, ToolUseBlock } from './api.ts';
+import type { ChatEvent, ToolResultBlock, ToolUseBlock } from './api.ts';
 import { basename, plural, toolName } from './format.ts';
 
 /**
@@ -82,7 +82,7 @@ function str(v: unknown): string | undefined {
 
 /** The shell command of a command-like call. */
 export function commandOf(b: ToolUseBlock): string | undefined {
-  if (typeof b.input === 'string') return b.input;
+  if (typeof b.input === 'string') return codexScriptCommands(b.input) ?? b.input;
   const o = obj(b.input);
   const c = o.command ?? o.cmd;
   if (typeof c === 'string') return c;
@@ -93,6 +93,25 @@ export function commandOf(b: ToolUseBlock): string | undefined {
     return parts.join(' ');
   }
   return undefined;
+}
+
+/** A Codex JS snippet that isn't just a wrapped shell command. */
+export function scriptOf(b: ToolUseBlock): string | undefined {
+  return typeof b.input === 'string' && b.name === 'exec' && !codexScriptCommands(b.input) ? b.input : undefined;
+}
+
+/** Codex "exec" wraps shell calls in JS: `tools.exec_command({cmd:"pwd && ls"})`. */
+function codexScriptCommands(src: string): string | undefined {
+  const cmds: string[] = [];
+  for (const m of src.matchAll(/exec_command\(\s*\{\s*["']?cmd["']?\s*:\s*("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`[^`]*`)/g)) {
+    const lit = m[1]!;
+    try {
+      cmds.push(lit.startsWith('"') ? (JSON.parse(lit) as string) : lit.slice(1, -1));
+    } catch {
+      cmds.push(lit.slice(1, -1));
+    }
+  }
+  return cmds.length ? cmds.join('\n') : undefined;
 }
 
 export function filePathOf(b: ToolUseBlock): string | undefined {
@@ -225,6 +244,8 @@ export function describeCall(b: ToolUseBlock): CallView {
   const { name } = toolName(b.name);
   switch (kind) {
     case 'command': {
+      const script = scriptOf(b);
+      if (script) return { kind, verb: 'Ran a script', target: script.trim().split('\n')[0], mono: true };
       const cmd = commandOf(b)?.trim();
       return { kind, verb: 'Ran', target: cmd?.split('\n')[0], mono: true, title: str(o.description) };
     }
@@ -281,7 +302,7 @@ export interface ActivityFacts {
 }
 
 /** "Ran 3 commands, edited App.tsx, searched the web" */
-export function summarize(events: ChatEvent[]): ActivityFacts {
+export function summarize(events: ChatEvent[], results: Map<string, ToolResultBlock>): ActivityFacts {
   const order: ToolKind[] = [];
   const count = new Map<ToolKind, number>();
   const files = new Map<'read' | 'edit' | 'write', Set<string>>([
@@ -303,6 +324,9 @@ export function summarize(events: ChatEvent[]): ActivityFacts {
     for (const b of e.blocks) {
       if (b.type === 'tool_use') {
         calls++;
+        const r = results.get(b.id);
+        if (r?.isError) errors++;
+        if (r) images += r.content.filter((c) => c.type === 'image').length;
         const k = toolKind(b.name);
         if (!count.has(k)) order.push(k);
         count.set(k, (count.get(k) ?? 0) + 1);

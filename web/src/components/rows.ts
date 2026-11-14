@@ -77,10 +77,19 @@ export function buildRows(events: ChatEvent[]): Row[] {
   let group: ChatEvent[] = [];
   let groupKey = '';
 
+  // Results are paired with their calls across the whole loaded range (a call
+  // and its result can land in different runs); paired results are shown
+  // under the call, so they're dropped from the event they arrived in.
+  const results = new Map<string, ToolResultBlock>();
+  const calls = new Set<string>();
+  for (const e of events)
+    for (const b of e.blocks) {
+      if (b.type === 'tool_result') results.set(b.toolUseId, b);
+      else if (b.type === 'tool_use') calls.add(b.id);
+    }
+
   const flush = () => {
     if (!group.length) return;
-    const results = new Map<string, ToolResultBlock>();
-    for (const e of group) for (const b of e.blocks) if (b.type === 'tool_result') results.set(b.toolUseId, b);
     rows.push({ kind: 'activity', key: groupKey, events: group, results, firstSeq: group[0]!.seq });
     group = [];
   };
@@ -89,7 +98,8 @@ export function buildRows(events: ChatEvent[]): Row[] {
     group.push(e);
   };
 
-  for (const e of events) {
+  for (let e of events) {
+    if (e.blocks.some((b) => b.type === 'tool_result' && calls.has(b.toolUseId))) e = { ...e, blocks: e.blocks.filter((b) => !(b.type === 'tool_result' && calls.has(b.toolUseId))) };
     // Records with nothing readable (e.g. signature-only thinking) would be empty rows.
     if (!e.blocks.some(hasContent)) continue;
     if (isPrompt(e)) {
