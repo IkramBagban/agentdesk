@@ -5,6 +5,7 @@ import type { DiscoveredFile, SourceAdapter } from '../core/adapter.ts';
 import type { ChatEvent, RawLine, SessionMeta } from '../core/types.ts';
 import { digestEvent } from './extract.ts';
 import { readLines } from './lines.ts';
+import { projectKeyFor } from './project.ts';
 
 export interface IndexProgress {
   filesDone: number;
@@ -51,6 +52,7 @@ type Row = Record<string, unknown>;
 interface FileRow {
   size: number;
   mtime_ms: number;
+  sidecar_mtime: number | null;
   indexed_size: number;
   indexed_lines: number;
   error_count: number;
@@ -97,8 +99,8 @@ interface Stmts {
 function prepare(db: DatabaseSync): Stmts {
   return {
     insEvent: db.prepare(
-      `INSERT INTO events(session_id, seq, line, offset, length, line_first_seq, role, visibility, ts, off_branch, synthetic, preview, has_image, tool_names)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`,
+      `INSERT INTO events(session_id, seq, line, offset, length, line_first_seq, role, visibility, ts, off_branch, synthetic, preview, dkey)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
     ),
     insFts: db.prepare('INSERT INTO events_fts(rowid, text) VALUES (?, ?)'),
     insLink: db.prepare(
@@ -125,6 +127,28 @@ function sha1(b: Buffer): string {
   return createHash('sha1').update(b).digest('hex');
 }
 
+/**
+ * Copy-detection key: forked / resumed sessions (and sub-agent files copied
+ * into each fork) repeat the same records with the same native uuid. Events
+ * with equal keys are the same message; search shows only one of them.
+ */
+function dedupeKey(sourceId: string, ev: ChatEvent, indexInLine: number): bigint | null {
+  if (!ev.uuid) return null;
+  return createHash('sha1').update(`${sourceId}\0${ev.uuid}\0${indexInLine}`).digest().readBigInt64BE(0);
+}
+
+
+/** mtime of the adapter's sidecar file (DiscoveredFile.extra.metaPath), null if none / missing. */
+async function sidecarMtime(file: DiscoveredFile): Promise<number | null> {
+  const p = file.extra?.metaPath;
+  if (typeof p !== 'string') return null;
+  try {
+    return (await stat(p)).mtimeMs;
+  } catch {
+    return null;
+  }
+}
+
 async function readTail(path: string, end: number): Promise<Buffer> {
   const start = Math.max(0, end - TAIL_BYTES);
   const len = end - start;
@@ -145,15 +169,13 @@ async function decide(
   adapter: SourceAdapter,
   path: string,
   st: { size: number; mtimeMs: number },
+  sidecar: number | null,
   prev: FileRow | undefined,
 ): Promise<{ mode: Mode; tail?: Buffer }> {
-  if (!prev) return { mode: 'full' };
-  if (!prev.error && prev.size === st.size && prev.mtime_ms === st.mtimeMs && prev.parser_version === parserVersionOf(adapter)) {
-    return { mode: 'skip' };
-  }
+  if (!prev || prev.error || prev.parser_version !== parserVersionOf(adapter)) return { mode: 'full' };
+  if (prev.sidecar_mtime !== sidecar) return { mode: 'full' }; // sub-agent .meta.json appeared / changed
+  if (prev.size === st.size && prev.mtime_ms === st.mtimeMs) return { mode: 'skip' };
   if (
-    !prev.error &&
-    prev.parser_version === parserVersionOf(adapter) &&
     prev.parser_state &&
     st.size > prev.size &&
     st.size >= prev.indexed_size
@@ -180,8 +202,10 @@ export async function indexFile(
   file: DiscoveredFile,
 ): Promise<FileOutcome> {
   const st = await stat(file.path);
+  const sidecar = await sidecarMtime(file);
   const prev = getFileRow(db, file.path);
-  const { mode, tail: seedTail } = await decide(adapter, file.path, st, prev);
+  const decided = await decide(adapter, file.path, st, sidecar, prev);
+  let mode = decided.mode;
   if (mode === 'skip') return { mode };
 
   const s = stmts(db);
@@ -194,12 +218,13 @@ export async function indexFile(
     let startOffset = 0;
     let startLine = 0;
     let tail: Buffer | null = null;
+    if (mode === 'resume' && (!prev || !existing)) mode = 'full';
     if (mode === 'resume' && prev && existing) {
       sessionId = String(existing.id);
       parser.resume(JSON.parse(prev.parser_state as string));
       startOffset = prev.indexed_size;
       startLine = prev.indexed_lines;
-      tail = seedTail ?? null;
+      tail = decided.tail ?? null;
       // drop events from a previously-partial trailing line; they get re-read
       db.prepare(
         'DELETE FROM events_fts WHERE rowid IN (SELECT id FROM events WHERE session_id = ? AND line >= ?)',
@@ -207,6 +232,7 @@ export async function indexFile(
       db.prepare('DELETE FROM events WHERE session_id = ? AND line >= ?').run(sessionId, startLine);
     } else {
       removeFileRows(db, file.path);
+      sessionId = unclaimedId(db, sessionId, file.path);
     }
 
     let line = startLine;
@@ -235,7 +261,7 @@ export async function indexFile(
         try {
           events = parser.push(rawLine);
         } catch {
-          parseErrors++;
+          if (rl.complete) parseErrors++; // a partial last line is re-read (and re-counted) on resume
         }
         const firstSeq = events[0]?.seq ?? 0;
         for (const ev of events) {
@@ -252,8 +278,7 @@ export async function indexFile(
             ev.timestamp ?? null,
             ev.synthetic ? 1 : 0,
             d.preview,
-            d.hasImage ? 1 : 0,
-            d.toolNames,
+            dedupeKey(adapter.id, ev, ev.seq - firstSeq),
           );
           if (d.fts) s.insFts.run(res.lastInsertRowid, d.fts);
           for (const b of ev.blocks ?? []) {
@@ -282,13 +307,14 @@ export async function indexFile(
 
     const tailHash = tail ? sha1(tail) : prev && mode === 'resume' ? prev.tail_hash : sha1(Buffer.alloc(0));
     db.prepare(
-      `INSERT OR REPLACE INTO files(path, source_id, size, mtime_ms, indexed_size, indexed_lines, tail_hash, parser_state, parser_version, error_count, error)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
+      `INSERT OR REPLACE INTO files(path, source_id, size, mtime_ms, sidecar_mtime, indexed_size, indexed_lines, tail_hash, parser_state, parser_version, error_count, error)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
     ).run(
       file.path,
       adapter.id,
       st.size,
       st.mtimeMs,
+      sidecar,
       lastCompleteEnd,
       completeLines,
       tailHash,
@@ -308,6 +334,16 @@ export async function indexFile(
     recordFileError(db, adapter, file.path, message);
     throw err;
   }
+}
+
+/**
+ * Two files can map to the same session id (e.g. a Codex rollout present in both
+ * sessions/ and archived_sessions/). The file indexed first keeps the id; others
+ * get a path-derived suffix so their rows never mix.
+ */
+function unclaimedId(db: DatabaseSync, id: string, path: string): string {
+  const owner = db.prepare('SELECT file_path FROM sessions WHERE id = ?').get(id) as Row | undefined;
+  return owner && owner.file_path !== path ? `${id}~${sha1(Buffer.from(path)).slice(0, 8)}` : id;
 }
 
 function recordFileError(db: DatabaseSync, adapter: SourceAdapter, path: string, message: string): void {
@@ -333,7 +369,8 @@ function finalizeSession(
   offBranchSeqs: number[],
   mtimeMs: number,
 ): string {
-  const id = meta.id || provisionalId;
+  let id = meta.id || provisionalId;
+  if (id !== provisionalId && unclaimedId(db, id, file.path) !== id) id = provisionalId;
   if (id !== provisionalId) {
     // adapter chose a different id than `${sourceId}:${nativeId}`: re-key what we inserted
     db.prepare('UPDATE events SET session_id = ? WHERE session_id = ?').run(id, provisionalId);
@@ -353,7 +390,7 @@ function finalizeSession(
     meta.sourceId ?? adapter.id,
     meta.nativeId ?? file.nativeId,
     file.path,
-    meta.projectKey ?? file.projectKey,
+    projectKeyFor(meta.projectPath, meta.projectKey ?? file.projectKey),
     meta.projectPath ?? null,
     meta.title ?? null,
     meta.firstPrompt ?? null,
@@ -463,5 +500,6 @@ export async function indexAll(
     done++;
     onProgress?.({ filesDone: done, filesTotal: list.length, current: file.path });
   }
+  if (result.indexed || result.removed) db.exec('PRAGMA incremental_vacuum');
   return result;
 }

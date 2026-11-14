@@ -80,9 +80,15 @@ export interface SearchHit {
   seq: number;
   sessionTitle?: string;
   projectKey: string;
+  /** absolute project directory of the hit's session, if known */
+  projectPath?: string;
   timestamp?: string;
   role: ChatEvent['role'];
-  /** HTML-escaped text with <mark>…</mark> around matches */
+  /**
+   * HTML-escaped text with <mark>…</mark> around matches. The store builds it
+   * from the stored preview only (may be ''); the server rebuilds it from the
+   * source file's event text.
+   */
   snippet: string;
 }
 

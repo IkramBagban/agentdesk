@@ -6,7 +6,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { indexAll } from '../../src/index/indexer.ts';
 import { cacheDir } from '../../src/index/paths.ts';
 import { openDb, SCHEMA_VERSION } from '../../src/index/schema.ts';
-import { SqliteIndexStore, sanitizeFtsQuery } from '../../src/index/sqlite-store.ts';
+import { sanitizeFtsQuery } from '../../src/index/snippet.ts';
+import { SqliteIndexStore } from '../../src/index/sqlite-store.ts';
 import { startIndexer } from '../../src/index/run.ts';
 import { fakeAdapter } from './fake-adapter.ts';
 
@@ -40,8 +41,9 @@ afterEach(() => {
 });
 
 const f = (name: string) => join(root, name + '.jsonl');
-const events = (d = db) => d.prepare('SELECT session_id, seq, line, offset, length, line_first_seq, role, visibility, ts, off_branch, preview, has_image, tool_names FROM events ORDER BY session_id, seq').all();
-const ftsRows = (d = db) => d.prepare('SELECT rowid, text FROM events_fts ORDER BY rowid').all().length;
+const events = (d = db) => d.prepare('SELECT session_id, seq, line, offset, length, line_first_seq, role, visibility, ts, off_branch, preview FROM events ORDER BY session_id, seq').all();
+// events_fts is contentless: count its documents via the docsize shadow table
+const ftsRows = (d = db) => Number((d.prepare('SELECT count(*) n FROM events_fts_docsize').get() as { n: number }).n);
 
 describe('byte offsets', () => {
   it('are exact for multi-byte UTF-8 and CRLF, and match file bytes', async () => {
@@ -175,7 +177,7 @@ describe('incremental', () => {
 });
 
 describe('sessions / links / branch', () => {
-  it('applies offBranch, tool links (event + sub-agent), has_image, never indexes base64', async () => {
+  it('applies offBranch, tool links (event + sub-agent), never indexes base64', async () => {
     writeFileSync(
       f('main'),
       [
@@ -189,8 +191,6 @@ describe('sessions / links / branch', () => {
     const store = new SqliteIndexStore(db);
     const refs = store.listEventRefs({ sessionId: 'fake:main', view: 'all', from: 0, limit: 10, direction: 'forward' });
     expect(refs.items.map((r) => r.offBranch)).toEqual([false, true, false]);
-    const row = db.prepare('SELECT has_image, tool_names FROM events WHERE session_id=? AND seq=2').get('fake:main') as any;
-    expect(row).toEqual({ has_image: 1, tool_names: 'Task' });
     expect(db.prepare("SELECT count(*) n FROM events_fts WHERE events_fts MATCH 'AAAAAAAA*'").get()).toEqual({ n: 0 });
     const links = store.toolLinks('fake:main');
     expect(links.get('tu9')).toBe('fake:agent-main-1');
@@ -311,12 +311,12 @@ describe('store: search', () => {
     expect(store.search({ q: 'fox', limit: 5, projectKey: 'projA' }).items.length).toBeGreaterThan(0);
   });
 
-  it('forged sentinel chars in content cannot inject <mark>', async () => {
-    writeFileSync(f('t'), L({ k: 'user', text: 'zzz \uE000injected\uE001 zzz' }) + '\n');
+  it('content containing <mark> cannot inject markup', async () => {
+    writeFileSync(f('t'), L({ k: 'user', text: 'zzz <mark>injected</mark> zzz' }) + '\n');
     await run();
     const store = new SqliteIndexStore(db);
     const r = store.search({ q: 'injected', limit: 5 });
-    expect(r.items[0]!.snippet.match(/<mark>/g)?.length).toBe(1);
+    expect(r.items[0]!.snippet).toBe('zzz &lt;mark&gt;<mark>injected</mark>&lt;/mark&gt; zzz');
   });
 });
 
@@ -365,7 +365,8 @@ describe('misc', () => {
     expect(rows).toHaveLength(3);
     expect(JSON.parse(buf.subarray(rows[2].offset, rows[2].offset + rows[2].length).toString()).text).toBe('tail');
     expect(rows[1].length).toBeGreaterThan(3_000_000);
-    expect((db.prepare('SELECT length(text) n FROM events_fts WHERE rowid = ?').get(rows.length > 1 ? (db.prepare('SELECT id FROM events WHERE seq=1').get() as any).id : 0) as any).n).toBeLessThanOrEqual(16384);
+    // FTS text is capped per event (16K chars); the docsize row holds its token count
+    expect(ftsRows()).toBe(3);
     expect(statSync(f('big')).size).toBeGreaterThan(3_000_000);
   });
 });

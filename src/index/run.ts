@@ -13,7 +13,7 @@
 import { existsSync } from 'node:fs';
 import { Worker } from 'node:worker_threads';
 import type { SourceAdapter } from '../core/adapter.ts';
-import type { IndexChange, IndexStore } from './store.ts';
+import type { IndexStatus, IndexStore } from './store.ts';
 import type { SourceId } from '../core/types.ts';
 import { openDb, prepareDb } from './schema.ts';
 import { SqliteIndexStore } from './sqlite-store.ts';
@@ -39,6 +39,9 @@ export interface RunningIndexer {
   stop(): Promise<void>;
 }
 
+const MAX_RESTARTS = 3;
+const RESTART_DELAY_MS = 1000;
+
 function workerUrl(): URL {
   const js = new URL('./worker.js', import.meta.url);
   if (existsSync(js)) return js;
@@ -59,53 +62,75 @@ export async function startIndexer(opts: StartIndexerOptions): Promise<RunningIn
     ...(opts.adapters.length ? { adapterIds: opts.adapters.map((a) => a.id) } : {}),
     ...(opts.adaptersModule ? { adaptersModule: opts.adaptersModule } : {}),
   };
-  const worker = new Worker(workerUrl(), { workerData });
-
   let idleWaiters: (() => void)[] = [];
+  let stopping = false;
   let exited = false;
+  let alive = false;
+  let crashes = 0;
   const flushIdle = () => {
     const w = idleWaiters;
     idleWaiters = [];
     for (const f of w) f();
   };
-  worker.on('message', (m: { type: string; status?: IndexChange & object; sessionId?: string; message?: string }) => {
-    if (m.type === 'progress' && m.status) {
-      const status = m.status as unknown as import('./store.ts').IndexStatus;
-      store.publish({ type: 'progress', status });
-      if (status.state === 'idle') flushIdle();
-    } else if (m.type === 'session-updated' && m.sessionId) {
-      store.publish({ type: 'session-updated', sessionId: m.sessionId });
-    } else if (m.type === 'error') {
-      store.publish({
-        type: 'progress',
-        status: { state: 'idle', filesDone: 0, filesTotal: 0, sessionCount: 0, lastError: m.message ?? 'indexer error' },
-      });
-    }
-  });
-  worker.on('error', (err: Error) => {
+  const reportError = (message: string) =>
     store.publish({
       type: 'progress',
-      status: { state: 'idle', filesDone: 0, filesTotal: 0, sessionCount: 0, lastError: err.message },
+      status: { state: 'idle', filesDone: 0, filesTotal: 0, sessionCount: 0, lastError: message },
     });
-    flushIdle();
-  });
-  worker.on('exit', () => {
-    exited = true;
-    flushIdle();
-  });
+
+  let worker: Worker;
+  /**
+   * The worker is restarted if it dies unexpectedly (uncaught error, OOM on a
+   * pathological file...): the index on disk is transactional per file, so a
+   * new worker resumes where the old one stopped. Bounded so a deterministic
+   * crash does not spin forever; a clean full pass resets the budget.
+   */
+  const spawn = () => {
+    worker = new Worker(workerUrl(), { workerData });
+    alive = true;
+    worker.on('message', (m: { type: string; status?: IndexStatus; sessionId?: string; message?: string }) => {
+      if (m.type === 'progress' && m.status) {
+        store.publish({ type: 'progress', status: m.status });
+        if (m.status.state === 'idle') {
+          if (!m.status.lastError) crashes = 0;
+          flushIdle();
+        }
+      } else if (m.type === 'session-updated' && m.sessionId) {
+        store.publish({ type: 'session-updated', sessionId: m.sessionId });
+      } else if (m.type === 'error') {
+        reportError(m.message ?? 'indexer error');
+      }
+    });
+    worker.on('error', (err: Error) => reportError(err.message));
+    worker.on('exit', (code) => {
+      alive = false;
+      if (!stopping && code !== 0 && ++crashes <= MAX_RESTARTS) {
+        setTimeout(() => {
+          if (!stopping) spawn();
+        }, RESTART_DELAY_MS * crashes).unref();
+        return;
+      }
+      exited = true;
+      flushIdle();
+    });
+  };
+  spawn();
 
   return {
     store,
     rescan: () => worker.postMessage({ type: 'rescan' }),
     whenIdle: () => (exited ? Promise.resolve() : new Promise<void>((r) => idleWaiters.push(r))),
     async stop() {
-      if (!exited) {
+      stopping = true;
+      if (alive) {
         const done = new Promise<void>((r) => worker.once('exit', () => r()));
         worker.postMessage({ type: 'stop' });
         const t = setTimeout(() => void worker.terminate(), 3000);
         await done;
         clearTimeout(t);
       }
+      exited = true;
+      flushIdle();
       reader.close();
     },
   };

@@ -2,12 +2,15 @@ import { createReadStream } from 'node:fs';
 import { readFile, realpath, stat } from 'node:fs/promises';
 import { isAbsolute, join, normalize, sep, extname } from 'node:path';
 import { Readable } from 'node:stream';
+import { fileURLToPath } from 'node:url';
 import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { stream, streamSSE } from 'hono/streaming';
 import type { ParseLine, SourceAdapter } from '../core/adapter.ts';
 import type { SourceId } from '../core/types.ts';
-import type { IndexStore } from '../index/store.ts';
+import { searchText } from '../index/extract.ts';
+import { makeSnippet } from '../index/snippet.ts';
+import type { EventRef, IndexStore, SearchHit } from '../index/store.ts';
 import {
   ExistsCache,
   lookupAdapter,
@@ -98,8 +101,34 @@ async function resolveAllowed(p: string, allowedRoots: string[]): Promise<string
   return isInside(real, await realRoots(allowedRoots)) ? real : undefined;
 }
 
-function safeMediaType(t: string | undefined): string {
-  return t && /^[A-Za-z0-9][\w.+-]*\/[A-Za-z0-9][\w.+-]*$/.test(t) ? t : 'application/octet-stream';
+/** Blob types we serve inline. Anything else (text/html, xml, js, ...) goes out as an opaque download. */
+const INLINE_TYPES = new Set([
+  'image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/avif', 'image/bmp', 'image/svg+xml', 'application/pdf',
+]);
+const IMAGE_EXT: Record<string, string> = {
+  '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp',
+  '.avif': 'image/avif', '.bmp': 'image/bmp',
+};
+const MAX_IMAGE_FILE_BYTES = 25 * 1024 * 1024;
+
+/**
+ * Real path of an image file recorded in a chat (e.g. a Codex screenshot in a
+ * temp dir). Allowed inside the scanned roots, or anywhere if it is a regular
+ * raster-image file (by extension) of bounded size: only images the chat
+ * references are reachable this way, never arbitrary text files.
+ */
+async function resolveImageFile(p: string, allowedRoots: string[]): Promise<{ real: string; type?: string } | undefined> {
+  const inRoots = await resolveAllowed(p, allowedRoots);
+  if (inRoots) return { real: inRoots };
+  if (!p || p.includes('\0') || !isAbsolute(p)) return undefined;
+  let real: string;
+  try {
+    real = await realpath(p);
+  } catch {
+    return undefined;
+  }
+  const type = IMAGE_EXT[extname(real).toLowerCase()];
+  return type ? { real, type } : undefined;
 }
 
 export function createApp(deps: AppDeps): Hono {
@@ -230,11 +259,18 @@ export function createApp(deps: AppDeps): Hono {
       // never let a blob (e.g. SVG/HTML) execute script in our origin
       'Content-Security-Policy': "sandbox; default-src 'none'; style-src 'unsafe-inline'",
     };
-    const type = safeMediaType(block.mediaType);
+    const mediaType = (block.mediaType ?? '').toLowerCase();
+    let type = INLINE_TYPES.has(mediaType) ? mediaType : 'application/octet-stream';
+    if (type === 'application/octet-stream') headers['Content-Disposition'] = 'attachment';
 
     if (block.type === 'image' && block.filePath && !block.data) {
-      const real = await resolveAllowed(block.filePath, deps.allowedRoots);
-      if (!real) return fail(c, 403, 'file outside allowed roots');
+      const file = await resolveImageFile(block.filePath, deps.allowedRoots);
+      if (!file) return fail(c, 403, 'file outside allowed roots');
+      const real = file.real;
+      if (file.type) {
+        type = file.type;
+        delete headers['Content-Disposition'];
+      }
       let st;
       try {
         st = await stat(real);
@@ -242,6 +278,7 @@ export function createApp(deps: AppDeps): Hono {
         return fail(c, 404, 'file not found');
       }
       if (!st.isFile()) return fail(c, 404, 'file not found');
+      if (st.size > MAX_IMAGE_FILE_BYTES) return fail(c, 413, 'file too large');
       headers['Content-Type'] = type;
       headers['Content-Length'] = String(st.size);
       return new Response(Readable.toWeb(createReadStream(real)) as ReadableStream, { headers });
@@ -277,9 +314,40 @@ export function createApp(deps: AppDeps): Hono {
 
   // ---- search ----------------------------------------------------------------
 
-  app.get('/api/search', (c) => {
+  /**
+   * The FTS index is contentless, so snippets are built from the hit's event
+   * re-read from the source file (same text that was indexed). Undefined entries
+   * keep the store's preview-based snippet.
+   */
+  async function sourceSnippets(hits: SearchHit[], q: string): Promise<(string | undefined)[]> {
+    const out: (string | undefined)[] = new Array(hits.length);
+    const bySession = new Map<string, number[]>();
+    hits.forEach((h, i) => {
+      const g = bySession.get(h.sessionId);
+      if (g) g.push(i);
+      else bySession.set(h.sessionId, [i]);
+    });
+    await Promise.all(
+      [...bySession].map(async ([sid, idxs]) => {
+        const found = lookupAdapter(adapters, store, sid);
+        if (!found?.adapter) return;
+        const refs = idxs.map((i) => store.getEventRef(sid, hits[i]!.seq));
+        const ok = refs.filter((r): r is EventRef => !!r);
+        const events = await readRefs(found.adapter, found.meta, ok);
+        const bySeq = new Map(events.map((e) => [e.seq, e]));
+        for (const i of idxs) {
+          const ev = bySeq.get(hits[i]!.seq);
+          const text = ev ? searchText(ev) : null;
+          if (text) out[i] = makeSnippet(text, q);
+        }
+      }),
+    );
+    return out;
+  }
+
+  app.get('/api/search', async (c) => {
     const q = c.req.query();
-    const text = (q.q ?? '').trim();
+    const text = (q.q ?? '').trim().slice(0, 500);
     if (!text) return fail(c, 400, 'q required');
     const page = store.search({
       q: text,
@@ -288,14 +356,16 @@ export function createApp(deps: AppDeps): Hono {
       cursor: q.cursor || undefined,
       limit: intParam(q.limit, 30, 1, 100),
     });
+    const snippets = await sourceSnippets(page.items, text);
     return c.json({
-      items: page.items.map((h) => ({
+      items: page.items.map((h, i) => ({
         sessionId: h.sessionId,
         seq: h.seq,
-        snippet: h.snippet,
+        snippet: snippets[i] ?? h.snippet,
         sessionTitle: h.sessionTitle,
         timestamp: h.timestamp,
         projectKey: h.projectKey,
+        projectPath: h.projectPath,
         role: h.role,
       })),
       nextCursor: page.nextCursor,
@@ -369,7 +439,7 @@ export function createApp(deps: AppDeps): Hono {
 
   // ---- static UI -------------------------------------------------------------
 
-  const webDir = deps.webDir ?? new URL('./web/', import.meta.url).pathname;
+  const webDir = deps.webDir ?? fileURLToPath(new URL('./web/', import.meta.url));
   const webRoot = normalize(webDir);
 
   app.get('*', async (c) => {

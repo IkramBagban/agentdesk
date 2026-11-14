@@ -1,11 +1,20 @@
 import type { DatabaseSync } from 'node:sqlite';
 import type { ChatEvent, ProjectMeta, SessionMeta, SourceId } from '../core/types.ts';
+import { NO_FOLDER_KEY } from './project.ts';
+import { escapeHtml, makeSnippet, sanitizeFtsQuery } from './snippet.ts';
 import type { EventRef, IndexChange, IndexStatus, IndexStore, Page, SearchHit } from './store.ts';
 
 type Row = Record<string, unknown>;
 
-const MARK_OPEN = '';
-const MARK_CLOSE = '';
+const MAX_SEARCH_OFFSET = 10_000;
+
+/**
+ * bm25() is negative (lower = better); multiplying boosts. Human prompts rank
+ * above other conversation (assistant prose, notices), which ranks clearly
+ * above 'detail' (tool calls/results, thinking), which otherwise dominate by
+ * sheer volume and repetition.
+ */
+const RANK_BOOST = `(CASE WHEN e.visibility = 'detail' THEN 1.0 WHEN e.role = 'user' AND e.synthetic = 0 THEN 3.0 ELSE 2.5 END)`;
 
 const SESSION_COLS = `id, source_id, native_id, file_path, project_key, project_path, title, first_prompt, started_at,
   updated_at, event_count, message_count, image_count, models, cost_usd, input_tokens, output_tokens, git_branch,
@@ -63,31 +72,12 @@ function unb64<T>(s: string | undefined): T | undefined {
   }
 }
 
-export function escapeHtml(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-}
-
-/**
- * Turn free text into a safe FTS5 query: every term quoted (so operators and
- * syntax characters are literal), implicit AND, prefix match on the last term.
- * Returns undefined when nothing searchable remains.
- */
-export function sanitizeFtsQuery(q: string): string | undefined {
-  const tokens = q
-    .replace(/\0/g, ' ')
-    .split(/\s+/)
-    .map((t) => t.replace(/"/g, ''))
-    .filter((t) => /[\p{L}\p{N}]/u.test(t))
-    .slice(0, 16);
-  if (!tokens.length) return undefined;
-  return tokens.map((t, i) => `"${t}"${i === tokens.length - 1 ? '*' : ''}`).join(' ');
-}
-
 function likeEscape(s: string): string {
   return s.replace(/[\\%_]/g, (c) => `\\${c}`);
 }
 
 function displayName(key: string, path: string | undefined): string {
+  if (key === NO_FOLDER_KEY) return 'No folder';
   if (path) {
     const parts = path.split(/[\\/]+/).filter(Boolean);
     if (parts.length) return parts[parts.length - 1] as string;
@@ -136,15 +126,19 @@ export class SqliteIndexStore implements IndexStore {
   }
 
   listProjects(opts: { sourceId?: SourceId }): ProjectMeta[] {
+    // Keys are agent-agnostic (see projectKeyFor), so one folder used by several
+    // agents is one project. With max(), SQLite takes the bare source_id from the
+    // most recently updated session: that source is reported as the project's.
     const rows = this.db
       .prepare(
-        `SELECT source_id, project_key, max(project_path) AS project_path, count(*) AS n, max(updated_at) AS updated_at
+        `SELECT project_key, source_id, max(updated_at) AS updated_at, max(project_path) AS project_path, count(*) AS n
          FROM sessions WHERE parent_session_id IS NULL AND (?1 IS NULL OR source_id = ?1)
-         GROUP BY source_id, project_key ORDER BY max(updated_at) DESC, project_key`,
+         GROUP BY project_key ORDER BY 3 DESC, project_key`,
       )
       .all(opts.sourceId ?? null) as Row[];
     return rows.map((r) => {
-      const path = optStr(r.project_path);
+      const key = String(r.project_key);
+      const path = key.startsWith('path:') ? key.slice(5) : key === NO_FOLDER_KEY ? undefined : optStr(r.project_path);
       const p: ProjectMeta = {
         key: String(r.project_key),
         sourceId: String(r.source_id),
@@ -178,7 +172,7 @@ export class SqliteIndexStore implements IndexStore {
     }
     if (!opts.includeSubSessions) where.push('parent_session_id IS NULL');
     if (opts.q?.trim()) {
-      const like = `%${likeEscape(opts.q.trim())}%`;
+      const like = `%${likeEscape(opts.q.trim().slice(0, 500))}%`;
       where.push("(title LIKE ? ESCAPE '\\' OR first_prompt LIKE ? ESCAPE '\\')");
       params.push(like, like);
     }
@@ -323,7 +317,7 @@ export class SqliteIndexStore implements IndexStore {
     const match = sanitizeFtsQuery(opts.q);
     if (!match) return { items: [] };
     const limit = Math.max(1, Math.min(opts.limit, 200));
-    const offset = Math.max(0, unb64<{ o: number }>(opts.cursor)?.o ?? 0);
+    const offset = Math.min(MAX_SEARCH_OFFSET, Math.max(0, Number(unb64<{ o: number }>(opts.cursor)?.o) || 0));
     const where = ['events_fts MATCH ?'];
     const params: (string | number)[] = [match];
     if (opts.sourceId) {
@@ -334,46 +328,44 @@ export class SqliteIndexStore implements IndexStore {
       where.push('s.project_key = ?');
       params.push(opts.projectKey);
     }
-    let ranked: Row[];
-    try {
-      ranked = this.db
-        .prepare(
-          `SELECT e.id AS eid, e.session_id, e.seq, e.role, e.ts, s.title, s.project_key
+    // Copies of the same record (forked / resumed sessions, sub-agent files copied
+    // into each fork) share a dkey: keep one hit per dkey, preferring the on-branch
+    // copy in the most recently updated session. The MATCH expression comes from
+    // sanitizeFtsQuery (every term quoted), so it cannot be a syntax error.
+    const ranked = this.db
+      .prepare(
+        `WITH m AS (
+           SELECT e.id AS eid, e.session_id, e.seq, e.role, e.ts, e.preview, e.off_branch, e.dkey,
+                  s.title, s.project_key, s.project_path, s.updated_at,
+                  bm25(events_fts) * ${RANK_BOOST} AS rank
            FROM events_fts JOIN events e ON e.id = events_fts.rowid JOIN sessions s ON s.id = e.session_id
            WHERE ${where.join(' AND ')}
-           ORDER BY bm25(events_fts), COALESCE(e.ts, s.updated_at) DESC, e.id
-           LIMIT ? OFFSET ?`,
-        )
-        .all(...params, limit + 1, offset) as Row[];
-    } catch {
-      return { items: [] };
-    }
+         ), d AS (
+           SELECT *, row_number() OVER (PARTITION BY COALESCE(dkey, -eid) ORDER BY off_branch, updated_at DESC, eid) AS copy
+           FROM m
+         )
+         SELECT eid, session_id, seq, role, ts, preview, title, project_key, project_path FROM d
+         WHERE copy = 1
+         ORDER BY rank, COALESCE(ts, updated_at) DESC, eid
+         LIMIT ? OFFSET ?`,
+      )
+      .all(...params, limit + 1, offset) as Row[];
     const more = ranked.length > limit;
     const page = more ? ranked.slice(0, limit) : ranked;
-    const snippets = new Map<number, string>();
-    if (page.length) {
-      const ids = page.map((r) => Number(r.eid));
-      const rows = this.db
-        .prepare(
-          `SELECT rowid AS rid, snippet(events_fts, 0, '${MARK_OPEN}', '${MARK_CLOSE}', '…', 24) AS snip
-           FROM events_fts WHERE events_fts MATCH ? AND rowid IN (${ids.map(() => '?').join(',')})`,
-        )
-        .all(match, ...ids) as Row[];
-      for (const r of rows) snippets.set(Number(r.rid), String(r.snip ?? ''));
-    }
     const items: SearchHit[] = page.map((r) => {
-      const snippet = escapeHtml(snippets.get(Number(r.eid)) ?? '')
-        .split(MARK_OPEN).join('<mark>')
-        .split(MARK_CLOSE).join('</mark>');
+      const preview = optStr(r.preview);
       const hit: SearchHit = {
         sessionId: String(r.session_id),
         seq: Number(r.seq),
         projectKey: String(r.project_key),
         role: String(r.role) as ChatEvent['role'],
-        snippet,
+        // provisional: the server rebuilds it from the source file (see /api/search)
+        snippet: preview ? (makeSnippet(preview, opts.q) ?? escapeHtml(preview)) : '',
       };
       const t = optStr(r.title);
       if (t) hit.sessionTitle = t;
+      const pp = optStr(r.project_path);
+      if (pp && r.project_key !== NO_FOLDER_KEY) hit.projectPath = pp;
       const ts = optStr(r.ts);
       if (ts) hit.timestamp = ts;
       return hit;

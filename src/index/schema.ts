@@ -6,7 +6,7 @@ import { DatabaseSync } from 'node:sqlite';
  * Bump when ANY table layout or the way rows are derived changes. A mismatch
  * deletes the database file and rebuilds from scratch.
  */
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 const DDL = `
 CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL);
@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS files (
   source_id      TEXT NOT NULL,
   size           INTEGER NOT NULL,   -- file size observed when indexing started
   mtime_ms       REAL NOT NULL,
+  sidecar_mtime  REAL,               -- mtime of DiscoveredFile.extra.metaPath (null: absent); a change forces re-index
   indexed_size   INTEGER NOT NULL,   -- byte offset just after the last COMPLETE line
   indexed_lines  INTEGER NOT NULL,   -- number of complete lines consumed (== next line number)
   tail_hash      TEXT,               -- sha1 of the <=256 bytes before indexed_size (append sanity check)
@@ -30,7 +31,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   source_id          TEXT NOT NULL,
   native_id          TEXT NOT NULL,
   file_path          TEXT NOT NULL,
-  project_key        TEXT NOT NULL,
+  project_key        TEXT NOT NULL,      -- agent-agnostic, see projectKeyFor() in indexer.ts
   project_path       TEXT,
   title              TEXT,
   first_prompt       TEXT,
@@ -69,12 +70,10 @@ CREATE TABLE IF NOT EXISTS events (
   ts             TEXT,
   off_branch     INTEGER NOT NULL DEFAULT 0,
   synthetic      INTEGER NOT NULL DEFAULT 0,
-  preview        TEXT,
-  has_image      INTEGER NOT NULL DEFAULT 0,
-  tool_names     TEXT
+  preview        TEXT,               -- 'conversation' events only (outline, snippet fallback)
+  dkey           INTEGER             -- copy-detection key (hash of source + record uuid + index in line); see search()
 );
 CREATE UNIQUE INDEX IF NOT EXISTS events_session_seq ON events(session_id, seq);
-CREATE INDEX IF NOT EXISTS events_session_vis_seq ON events(session_id, visibility, seq);
 -- serves view=conversation (visibility != 'meta') in seq order; the query must use the same predicate
 CREATE INDEX IF NOT EXISTS events_session_nonmeta ON events(session_id, seq) WHERE visibility != 'meta';
 
@@ -87,15 +86,19 @@ CREATE TABLE IF NOT EXISTS tool_links (
 );
 CREATE INDEX IF NOT EXISTS tool_links_sub ON tool_links(sub_session_id);
 
--- rowid == events.id. Only 'text' is indexed; session/seq come from the events join.
+-- rowid == events.id. Contentless: stores only the inverted index; snippets are
+-- rebuilt from the source file (see src/index/snippet.ts).
 CREATE VIRTUAL TABLE IF NOT EXISTS events_fts USING fts5(
   text,
+  content = '',
+  contentless_delete = 1,
   tokenize = 'unicode61 remove_diacritics 2'
 );
 `;
 
 function applyPragmas(db: DatabaseSync): void {
   db.exec('PRAGMA busy_timeout = 10000');
+  db.exec('PRAGMA auto_vacuum = INCREMENTAL'); // only takes effect on a new, empty DB
   db.exec('PRAGMA journal_mode = WAL');
   db.exec('PRAGMA synchronous = NORMAL');
 }

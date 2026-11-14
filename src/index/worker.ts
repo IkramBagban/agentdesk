@@ -137,4 +137,5 @@ async function main(): Promise<void> {
 
 main().catch((err) => {
   port.postMessage({ type: 'error', message: err instanceof Error ? err.message : String(err) });
+  process.exit(1); // let the supervisor in run.ts decide whether to restart
 });

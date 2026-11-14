@@ -5,8 +5,6 @@ export const FTS_CAP_CONVERSATION = 16 * 1024;
 export const FTS_CAP_DETAIL = 6 * 1024;
 export const PREVIEW_CHARS = 200;
 
-// Private-use chars are our snippet markers; strip them from indexed text so content can't forge <mark>.
-const SENTINELS = /[\u0000]/g;
 
 class Collector {
   private parts: string[] = [];
@@ -30,7 +28,7 @@ class Collector {
     this.len += piece.length + 1;
   }
   text(): string {
-    return this.parts.join('\n').replace(SENTINELS, '');
+    return this.parts.join('\n');
   }
 }
 
@@ -45,16 +43,14 @@ function walkValue(v: unknown, c: Collector, depth: number): void {
   if (c.full || v == null) return;
   if (typeof v === 'string') {
     if (!looksOpaque(v)) c.add(v);
-  } else if (typeof v === 'number' || typeof v === 'boolean') {
-    // not useful for search
-  } else if (depth > 6) {
-    return;
+  } else if (typeof v !== 'object' || depth > 6) {
+    return; // numbers/booleans are not useful for search
   } else if (Array.isArray(v)) {
     for (const x of v) {
       if (c.full) break;
       walkValue(x, c, depth + 1);
     }
-  } else if (typeof v === 'object') {
+  } else {
     for (const x of Object.values(v as Record<string, unknown>)) {
       if (c.full) break;
       walkValue(x, c, depth + 1);
@@ -62,7 +58,7 @@ function walkValue(v: unknown, c: Collector, depth: number): void {
   }
 }
 
-function walkBlocks(blocks: Block[], c: Collector, flags: { image: boolean; tools: string[] }): void {
+function walkBlocks(blocks: Block[], c: Collector): void {
   for (const b of blocks) {
     if (!b) continue;
     switch (b.type) {
@@ -73,15 +69,11 @@ function walkBlocks(blocks: Block[], c: Collector, flags: { image: boolean; tool
         if (!b.redacted) c.add(b.text);
         break;
       case 'tool_use':
-        flags.tools.push(b.name);
         c.add(b.name);
         walkValue(b.input, c, 0);
         break;
       case 'tool_result':
-        walkBlocks(b.content ?? [], c, flags);
-        break;
-      case 'image':
-        flags.image = true;
+        walkBlocks(b.content ?? [], c);
         break;
       case 'document':
         if (b.title) c.add(b.title);
@@ -94,13 +86,12 @@ function walkBlocks(blocks: Block[], c: Collector, flags: { image: boolean; tool
         c.add(b.text);
         break;
       default:
-        break; // raw: not indexed
+        break; // image (binary) and raw: not indexed
     }
   }
 }
 
 function firstString(blocks: Block[]): string | undefined {
-  // prefer plain text, then thinking-free fallbacks
   for (const b of blocks) if (b.type === 'text' && b.text.trim()) return b.text;
   for (const b of blocks) {
     if (b.type === 'tool_use') {
@@ -119,27 +110,29 @@ function firstString(blocks: Block[]): string | undefined {
   return undefined;
 }
 
+/**
+ * The searchable text of an event (what goes into FTS), or null if the event
+ * is not indexed (meta). Also used to build search snippets from the source
+ * file, so FTS text and snippets cannot disagree.
+ */
+export function searchText(ev: ChatEvent): string | null {
+  if (ev.visibility === 'meta') return null;
+  const c = new Collector(ev.visibility === 'conversation' ? FTS_CAP_CONVERSATION : FTS_CAP_DETAIL);
+  walkBlocks(ev.blocks ?? [], c);
+  return c.text().trim() || null;
+}
+
 export interface EventDigest {
+  /** short one-line text; only kept for 'conversation' events (outline + snippet fallback) */
   preview: string | null;
-  hasImage: boolean;
-  toolNames: string | null;
-  /** null when the event should not be in the FTS index */
   fts: string | null;
 }
 
 export function digestEvent(ev: ChatEvent): EventDigest {
-  const cap = ev.visibility === 'conversation' ? FTS_CAP_CONVERSATION : FTS_CAP_DETAIL;
-  const c = new Collector(ev.visibility === 'meta' ? 0 : cap);
-  const flags = { image: false, tools: [] as string[] };
-  // for meta events we still need flags; collector with cap 0 ignores text
-  walkBlocks(ev.blocks ?? [], c, flags);
-  const first = firstString(ev.blocks ?? []);
-  const preview = first ? first.slice(0, 2000).replace(/\s+/g, ' ').trim().slice(0, PREVIEW_CHARS) : '';
-  const fts = ev.visibility === 'meta' ? null : c.text().trim();
-  return {
-    preview: preview || null,
-    hasImage: flags.image,
-    toolNames: flags.tools.length ? [...new Set(flags.tools)].join(',') : null,
-    fts: fts ? fts : null,
-  };
+  let preview: string | null = null;
+  if (ev.visibility === 'conversation') {
+    const first = firstString(ev.blocks ?? []);
+    preview = first ? first.slice(0, 2000).replace(/\s+/g, ' ').trim().slice(0, PREVIEW_CHARS) || null : null;
+  }
+  return { preview, fts: searchText(ev) };
 }
