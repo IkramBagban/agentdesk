@@ -1,12 +1,13 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { ArrowDownToLine, ArrowUpToLine, GitBranch, Images, Wrench } from 'lucide-react';
+import { ArrowDownToLine, ArrowUpToLine, ClipboardPaste, GitBranch, Images, Wrench } from 'lucide-react';
 import { api, type ChatEvent, type View } from '../api.ts';
 import { navigate } from '../router.ts';
-import { fullDate, time } from '../format.ts';
+import { bytes, fullDate, time } from '../format.ts';
 import { activitySummary, buildRows, type Row } from './rows.ts';
-import { BlockView, type BlockCtx } from './Blocks.tsx';
+import { BlockView, Disclosure, type BlockCtx } from './Blocks.tsx';
+import { Markdown } from './Markdown.tsx';
 
 const PAGE = 120;
 const END = 2 ** 31 - 1;
@@ -115,7 +116,7 @@ export function Conversation({ sessionId, view, seq, onScrollToPrompt }: { sessi
           return (
             <div key={it.key} data-index={it.index} ref={v.measureElement} className="absolute top-0 left-0 w-full" style={{ transform: `translateY(${it.start}px)` }}>
               <div className="mx-auto max-w-[46rem] px-5 sm:px-8">
-                <RowView row={row} ctxBase={ctxBase} highlight={seq != null && rowSeqs(row).includes(seq)} />
+                <RowView row={row} ctxBase={ctxBase} showInjected={view === 'all'} highlight={seq != null && rowSeqs(row).includes(seq)} />
               </div>
             </div>
           );
@@ -158,11 +159,11 @@ function Empty({ title, body }: { title: string; body?: string }) {
 
 /* ------------------------------------------------------------------ */
 
-const RowView = memo(function RowView({ row, ctxBase, highlight }: { row: Row; ctxBase: Omit<BlockCtx, 'seq'>; highlight: boolean }) {
+const RowView = memo(function RowView({ row, ctxBase, highlight, showInjected }: { row: Row; ctxBase: Omit<BlockCtx, 'seq'>; highlight: boolean; showInjected: boolean }) {
   const hl = highlight ? 'rounded-lg ring-2 ring-mark ring-offset-4 ring-offset-paper' : '';
   switch (row.kind) {
     case 'prompt':
-      return <Prompt event={row.event} ctx={{ ...ctxBase, seq: row.event.seq }} className={hl} />;
+      return <Prompt event={row.event} ctx={{ ...ctxBase, seq: row.event.seq }} className={hl} showInjected={showInjected} />;
     case 'reply':
       return (
         <div className={`pt-3 pb-4 ${row.event.offBranch ? 'opacity-55' : ''} ${hl}`}>
@@ -189,7 +190,44 @@ const RowView = memo(function RowView({ row, ctxBase, highlight }: { row: Row; c
   }
 });
 
-function Prompt({ event, ctx, className }: { event: ChatEvent; ctx: BlockCtx; className: string }) {
+const PASTE_RE = /<pasted_content(?:\s+id="[^"]*")?>\n?([\s\S]*?)\n?<\/pasted_content(?:\s+id="[^"]*")?>/g;
+
+/** Split a prompt's text into what was typed and what was pasted. */
+function splitPasted(text: string): { kind: 'typed' | 'pasted'; text: string }[] {
+  const out: { kind: 'typed' | 'pasted'; text: string }[] = [];
+  let last = 0;
+  for (const m of text.matchAll(PASTE_RE)) {
+    const before = text.slice(last, m.index).trim();
+    if (before) out.push({ kind: 'typed', text: before });
+    out.push({ kind: 'pasted', text: m[1] ?? '' });
+    last = m.index + m[0].length;
+  }
+  // A paste cut off by transport truncation has no closing tag.
+  const rest = text.slice(last);
+  const open = rest.search(/<pasted_content(?:\s+id="[^"]*")?>/);
+  if (open >= 0) {
+    const before = rest.slice(0, open).trim();
+    if (before) out.push({ kind: 'typed', text: before });
+    out.push({ kind: 'pasted', text: rest.slice(open).replace(/^<pasted_content[^>]*>\n?/, '') });
+  } else if (rest.trim()) out.push({ kind: 'typed', text: rest.trim() });
+  return out;
+}
+
+function PastedText({ text, truncated }: { text: string; truncated?: { fullLength: number } }) {
+  const lines = text.split('\n').length;
+  return (
+    <Disclosure summary={<span className="inline-flex items-center gap-1.5"><ClipboardPaste size={13} /> Pasted text <span className="text-faint">{truncated ? `${bytes(truncated.fullLength)} in total` : `${lines} lines, ${bytes(text.length)}`}</span></span>}>
+      {() => (
+        <div className="rounded-md border border-rule bg-surface p-3 text-ink [&_.prose-msg]:font-serif [&_.prose-msg]:text-[14.5px] [&_.prose-msg]:font-normal">
+          <Markdown text={text} />
+          {truncated && <p className="mt-2 font-sans text-[13px] text-faint">Showing the first part. Export the chat to read the whole paste.</p>}
+        </div>
+      )}
+    </Disclosure>
+  );
+}
+
+function Prompt({ event, ctx, className, showInjected }: { event: ChatEvent; ctx: BlockCtx; className: string; showInjected: boolean }) {
   return (
     <div id={`seq-${event.seq}`} className={`pt-8 pb-3 ${event.offBranch ? 'opacity-55' : ''} ${className}`}>
       {event.offBranch && <OffBranch />}
@@ -197,10 +235,26 @@ function Prompt({ event, ctx, className }: { event: ChatEvent; ctx: BlockCtx; cl
         <div className="mb-1 text-[12px] text-faint" title={fullDate(event.timestamp)}>
           You · {time(event.timestamp)}
         </div>
-        <div className="space-y-3 font-sans text-[16.5px] leading-relaxed font-[520] text-prompt [&_.prose-msg]:font-sans [&_.prose-msg]:text-[16.5px]">
-          {event.blocks.map((b, i) => (
-            <BlockView key={i} block={b} ctx={ctx} />
-          ))}
+        <div className="space-y-2 text-prompt [&_.prose-msg]:font-sans [&_.prose-msg]:text-[16px] [&_.prose-msg]:leading-relaxed [&_.prose-msg]:font-[520]">
+          {event.blocks.map((b, i) => {
+            if (b.type === 'notice' && b.kind === 'injected') {
+              return showInjected ? (
+                <Disclosure key={i} summary={<span className="text-faint">Context added by the app</span>}>
+                  {() => <pre className="code-block whitespace-pre-wrap">{b.text}</pre>}
+                </Disclosure>
+              ) : null;
+            }
+            if (b.type === 'text' && b.text.includes('<pasted_content')) {
+              return (
+                <div key={i} className="space-y-2">
+                  {splitPasted(b.text).map((part, j) =>
+                    part.kind === 'pasted' ? <PastedText key={j} text={part.text} truncated={b.truncated} /> : <BlockView key={j} block={{ type: 'text', text: part.text }} ctx={ctx} />,
+                  )}
+                </div>
+              );
+            }
+            return <BlockView key={i} block={b} ctx={ctx} />;
+          })}
         </div>
       </div>
     </div>

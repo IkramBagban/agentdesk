@@ -9,6 +9,8 @@ import type { ChatEvent, RawLine, SessionMeta, SourceId } from './types.ts';
 export interface SourceAdapter {
   id: SourceId;
   displayName: string;
+  /** Bump whenever parse output changes; the indexer re-parses files indexed by an older version. */
+  parserVersion?: string;
 
   /** Default root directories to scan (e.g. ~/.claude/projects). May not exist. */
   defaultRoots(): string[];

@@ -34,6 +34,7 @@ async function walk(dir: string, out: DiscoveredFile[]): Promise<void> {
 export const codexAdapter: SourceAdapter & { parseLine: ParseLine } = {
   id: 'codex',
   displayName: 'Codex',
+  parserVersion: '1',
   defaultRoots() {
     const home = codexHome();
     return [join(home, 'sessions'), join(home, 'archived_sessions')];

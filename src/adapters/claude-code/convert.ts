@@ -226,13 +226,41 @@ function draft(rec: Rec, role: Role, visibility: Visibility, blocks: Block[], ex
   return { ...base(rec), role, visibility, blocks, ...extra };
 }
 
-function userText(rec: Rec, blocks: Block[], hint?: { forceMeta?: boolean }): Draft {
+const REMINDER_RE = /<system-reminder>[\s\S]*?<\/system-reminder>/g;
+
+/**
+ * Harness-injected <system-reminder> segments often ride along in the same
+ * record as what the human typed. Pull them out into 'injected' notices so
+ * the prompt shows only the human's words (the notices stay visible in the
+ * "Everything" view).
+ */
+function splitInjected(blocks: Block[]): Block[] {
+  const out: Block[] = [];
+  for (const b of blocks) {
+    if (b.type !== 'text' || !b.text.includes('<system-reminder>')) {
+      out.push(b);
+      continue;
+    }
+    const injected = b.text.match(REMINDER_RE) ?? [];
+    const rest = b.text.replace(REMINDER_RE, '').trim();
+    for (const seg of injected) {
+      out.push(notice('info', 'injected', seg.replace(/^<system-reminder>\s*|\s*<\/system-reminder>$/g, '')));
+    }
+    if (rest) out.push(textBlock(rest));
+  }
+  return out;
+}
+
+function userText(rec: Rec, rawBlocks: Block[], hint?: { forceMeta?: boolean }): Draft {
+  const whole = textOf(rawBlocks).trim();
+  if (rec.isMeta === true || hint?.forceMeta || (!rawBlocks.some((b) => b.type !== 'text') && whole && isWrapperOnly(whole))) {
+    return draft(rec, 'user', 'meta', rawBlocks, { synthetic: true });
+  }
+  const blocks = splitInjected(rawBlocks);
+  if (!blocks.some((b) => b.type !== 'notice')) return draft(rec, 'user', 'meta', blocks, { synthetic: true });
   const text = textOf(blocks);
   const hasNonText = blocks.some((b) => b.type !== 'text');
   const trimmed = text.trim();
-  if (rec.isMeta === true || hint?.forceMeta || (!hasNonText && trimmed && isWrapperOnly(trimmed))) {
-    return draft(rec, 'user', 'meta', blocks, { synthetic: true });
-  }
   if (rec.isCompactSummary === true) {
     return draft(rec, 'user', 'detail', blocks, { synthetic: true });
   }

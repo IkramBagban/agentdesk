@@ -89,6 +89,7 @@ mark {
   outline-offset: 2px;
 }
 
+@layer components {
 /* Long-form message prose */
 .prose-msg {
   font-family: var(--font-serif);
@@ -159,6 +160,8 @@ mark {
 }
 .prose-msg th { background: var(--sunken); font-weight: 600; }
 .prose-msg hr { border: 0; border-top: 1px solid var(--rule); }
+
+}
 
 [data-theme='dark'] .shiki,
 [data-theme='dark'] .shiki span {

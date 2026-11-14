@@ -77,7 +77,7 @@ export function App() {
 
   return (
     <div className="flex h-full">
-      <div className={`fixed inset-y-0 left-0 z-30 w-[22rem] max-w-[88vw] transition-transform lg:static lg:translate-x-0 ${drawer ? 'translate-x-0 shadow-2xl' : '-translate-x-full'}`}>
+      <div className={`fixed inset-y-0 left-0 z-30 w-[22rem] max-w-[88vw] max-lg:transition-transform lg:static lg:translate-x-0 ${drawer ? 'translate-x-0 shadow-2xl' : '-translate-x-full'}`}>
         <Sidebar status={status.data} />
       </div>
       {drawer && <div className="fixed inset-0 z-20 bg-black/30 lg:hidden" onClick={() => setDrawer(false)} />}
