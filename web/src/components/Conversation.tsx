@@ -471,7 +471,7 @@ function Activity({ row, ctxBase, defaultOpen }: { row: Extract<Row, { kind: 'ac
   }, [row.events]);
   const Icon = firstTool ? kindIcon(firstTool) : Brain;
   const onlyMeta = s.calls === 0 && s.thinking === 0;
-  const dur = row.durationMs != null && row.durationMs >= 2000 ? duration(row.durationMs) : undefined;
+  const dur = !onlyMeta && row.durationMs != null && row.durationMs >= 2000 ? duration(row.durationMs) : undefined;
 
   return (
     <div className="py-1">

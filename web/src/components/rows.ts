@@ -124,7 +124,10 @@ export function buildRows(events: ChatEvent[]): Row[] {
     const r = rows[i]!;
     if (r.kind !== 'activity') continue;
     const start = rowTime(r);
-    const end = (i + 1 < rows.length ? rowTime(rows[i + 1]!) : undefined) ?? [...r.events].reverse().find((e) => e.timestamp)?.timestamp;
+    // Until the reply that follows; if the user speaks next, only until the last step (not their idle time).
+    const next = rows[i + 1];
+    const lastStep = [...r.events].reverse().find((e) => e.timestamp)?.timestamp;
+    const end = next && next.kind !== 'prompt' ? (rowTime(next) ?? lastStep) : lastStep;
     r.durationMs = span(start, end);
   }
 

@@ -117,7 +117,7 @@ export function Sidebar({ status, theme, onTheme, onClose }: { status?: Status; 
               role="tab"
               aria-selected={mode === m}
               onClick={() => setMode(m)}
-              className={`rounded-md px-2 py-1 text-[12.5px] font-medium transition-colors ${mode === m ? 'text-ink' : 'text-faint hover:text-muted'}`}
+              className={`rounded-md px-2 py-1 text-[12.5px] font-medium transition-colors ${mode === m ? 'bg-hover text-ink' : 'text-faint hover:text-muted'}`}
             >
               {m === 'projects' ? 'Projects' : 'Recent'}
             </button>
@@ -397,7 +397,7 @@ function RecentList({ projectMap }: { projectMap: Map<string, ProjectMeta> }) {
           >
             <div className="truncate text-[13.5px] text-ink/90">{i.s.title || i.s.firstPrompt || 'Untitled chat'}</div>
             <div className="mt-0.5 flex items-center gap-1.5 text-[11.5px] text-faint">
-              <span className="min-w-0 truncate">{labelFor(groupKey(i.s), projectMap)}</span>
+              <span className="min-w-0 truncate">{isScratch(i.s) ? 'Scratch chat' : labelFor(groupKey(i.s), projectMap)}</span>
               <span>·</span>
               <span className="shrink-0">{relDate(i.s.updatedAt)}</span>
               {!route.source && i.s.sourceId !== 'claude-code' && (
@@ -442,7 +442,7 @@ function SearchResults({ q: text, projectMap }: { q: string; projectMap: Map<str
         estimate={() => 92}
         getKey={(h) => `${h.sessionId}:${h.seq}`}
         onEnd={loadMore}
-        render={(h) => <Hit h={h} active={route.sessionId === h.sessionId && route.seq === h.seq} project={labelFor(groupKey(h), projectMap)} />}
+        render={(h) => <Hit h={h} active={route.sessionId === h.sessionId && route.seq === h.seq} project={isScratch(h) ? 'Scratch chat' : labelFor(groupKey(h), projectMap)} />}
       />
     </>
   );
