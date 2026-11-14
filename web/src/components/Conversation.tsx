@@ -1,23 +1,26 @@
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { ArrowDownToLine, ArrowUpToLine, ClipboardPaste, GitBranch, Images, Wrench } from 'lucide-react';
-import { api, type ChatEvent, type View } from '../api.ts';
+import { ArrowDown, Brain, ChevronRight, ClipboardPaste, GitBranch, Images } from 'lucide-react';
+import { api, type Block, type ChatEvent, type View } from '../api.ts';
 import { navigate } from '../router.ts';
-import { bytes, fullDate, time, toolName } from '../format.ts';
-import { activitySummary, buildRows, type Row } from './rows.ts';
-import { BlockView, Disclosure, type BlockCtx } from './Blocks.tsx';
+import { bytes, duration, fullDate, plural, separatorDate, time } from '../format.ts';
+import { sentence, summarize } from '../tools.ts';
+import { buildRows, rowSeqs, type Row } from './rows.ts';
+import { BlockView, Disclosure, ImageView, kindIcon, type BlockCtx } from './Blocks.tsx';
 import { Markdown } from './Markdown.tsx';
+import { Minimap } from './Spine.tsx';
+import { CopyButton } from './ui.tsx';
 
 const PAGE = 120;
 const END = 2 ** 31 - 1;
 
 type Param = { from: number; dir: 'forward' | 'backward' };
 
-export function Conversation({ sessionId, view, seq, onScrollToPrompt }: { sessionId: string; view: View; seq?: number; onScrollToPrompt?: (fn: (seq: number) => void) => void }) {
+export function Conversation({ sessionId, view, seq }: { sessionId: string; view: View; seq?: number }) {
   const initial: Param = seq != null ? { from: Math.max(0, seq - 6), dir: 'forward' } : { from: 0, dir: 'forward' };
   const [anchor, setAnchor] = useState<Param>(initial);
-  // Reset when the session/jump target changes.
+  // Re-anchor when the jump target changes.
   useEffect(() => setAnchor(initial), [sessionId, seq, view]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const q = useInfiniteQuery({
@@ -36,18 +39,19 @@ export function Conversation({ sessionId, view, seq, onScrollToPrompt }: { sessi
     return out.sort((a, b) => a.seq - b.seq);
   }, [q.data]);
   const rows = useMemo(() => buildRows(events), [events]);
-  const total = q.data?.pages[0]?.total;
 
   const meta = useQuery({ queryKey: ['session', sessionId], queryFn: () => api.session(sessionId) });
-  const promptAuthor = meta.data?.parentSessionId ? 'Main agent' : 'You';
+  const fromAgent = !!meta.data?.parentSessionId;
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const v = useVirtualizer({
     count: rows.length,
     getScrollElement: () => scrollRef.current,
-    estimateSize: () => 140,
+    estimateSize: (i) => estimate(rows[i]!),
     overscan: 6,
     getItemKey: (i) => rows[i]!.key,
+    paddingStart: 8,
+    paddingEnd: 120,
   });
 
   // Older rows are fetched only when the reader scrolls near the top, and
@@ -63,15 +67,34 @@ export function Conversation({ sessionId, view, seq, onScrollToPrompt }: { sessi
     el.scrollTop = p.top + (v.getTotalSize() - p.total);
   }, [firstKey, v]);
 
-  const onScroll = () => {
+  // Which prompt is at the top of the viewport (for the minimap), and whether we're near the end.
+  const [currentSeq, setCurrentSeq] = useState<number>();
+  const [nearEnd, setNearEnd] = useState(true);
+  const updatePosition = useCallback(() => {
     const el = scrollRef.current;
-    if (!el || el.scrollTop > 600 || !q.hasPreviousPage || q.isFetchingPreviousPage || pendingPrepend.current) return;
+    if (!el) return;
+    setNearEnd(el.scrollHeight - el.scrollTop - el.clientHeight < 240);
+    const top = el.scrollTop + 96;
+    const vis = v.getVirtualItems();
+    let idx = vis.find((it) => it.end > top)?.index ?? vis[0]?.index;
+    if (idx == null) return;
+    for (; idx >= 0; idx--) {
+      const r = rows[idx]!;
+      if (r.kind === 'prompt') return setCurrentSeq(r.event.seq);
+    }
+  }, [rows, v]);
+
+  const onScroll = () => {
+    updatePosition();
+    const el = scrollRef.current;
+    if (!el || el.scrollTop > 800 || !q.hasPreviousPage || q.isFetchingPreviousPage || pendingPrepend.current) return;
     pendingPrepend.current = { top: el.scrollTop, total: v.getTotalSize(), firstKey };
     void q.fetchPreviousPage().then((r) => {
       // Nothing was added (e.g. error): allow another attempt.
       if (r.data?.pages[0]?.items.length === 0 || r.isError) pendingPrepend.current = undefined;
     });
   };
+  useEffect(updatePosition, [rows.length, updatePosition]);
 
   // Jump target: scroll to the row containing `seq` once loaded.
   const jumped = useRef<string>('');
@@ -84,6 +107,14 @@ export function Conversation({ sessionId, view, seq, onScrollToPrompt }: { sessi
     }
   }, [rows, seq, sessionId, v]);
 
+  // After "jump to end" loads the last page, land at the bottom.
+  const landedEnd = useRef(false);
+  useEffect(() => {
+    if (anchor.from !== END || landedEnd.current || !rows.length) return;
+    landedEnd.current = true;
+    requestAnimationFrame(() => v.scrollToIndex(rows.length - 1, { align: 'end' }));
+  }, [anchor.from, rows.length, v]);
+
   // Newer rows: fetch when the end comes into view.
   const items = v.getVirtualItems();
   useEffect(() => {
@@ -91,23 +122,34 @@ export function Conversation({ sessionId, view, seq, onScrollToPrompt }: { sessi
     if (last && last.index >= rows.length - 3 && q.hasNextPage && !q.isFetchingNextPage) void q.fetchNextPage();
   }, [items, rows.length, q]);
 
-  // Let the outline spine scroll us.
-  useEffect(() => {
-    onScrollToPrompt?.((target) => {
+  const jumpTo = useCallback(
+    (target: number) => {
       const idx = rows.findIndex((r) => rowSeqs(r).includes(target));
-      if (idx >= 0) v.scrollToIndex(idx, { align: 'start', behavior: 'smooth' });
+      if (idx >= 0) v.scrollToIndex(idx, { align: 'start', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
       else navigate({ seq: target }, { replace: true });
-    });
-  }, [rows, v, onScrollToPrompt]);
+    },
+    [rows, v],
+  );
+
+  const toBottom = () => {
+    if (q.hasNextPage) {
+      landedEnd.current = false;
+      navigate({ seq: undefined }, { replace: true });
+      setAnchor({ from: END, dir: 'backward' });
+    } else v.scrollToIndex(rows.length - 1, { align: 'end' });
+  };
 
   // j / k move between prompts.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.metaKey || e.ctrlKey) return;
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.metaKey || e.ctrlKey || e.altKey) return;
       if (e.key !== 'j' && e.key !== 'k') return;
-      const top = v.getVirtualItems()[0]?.index ?? 0;
+      const el = scrollRef.current;
+      const top = (el?.scrollTop ?? 0) + 24;
+      const vis = v.getVirtualItems();
+      const at = vis.find((it) => it.end > top)?.index ?? 0;
       const step = e.key === 'j' ? 1 : -1;
-      for (let i = top + step; i >= 0 && i < rows.length; i += step) {
+      for (let i = at + step; i >= 0 && i < rows.length; i += step) {
         if (rows[i]!.kind === 'prompt') return v.scrollToIndex(i, { align: 'start' });
       }
     };
@@ -115,56 +157,82 @@ export function Conversation({ sessionId, view, seq, onScrollToPrompt }: { sessi
     return () => window.removeEventListener('keydown', onKey);
   }, [rows, v]);
 
-  if (q.isError) return <Empty title="This chat couldn't be loaded" body={(q.error as Error).message} />;
-  if (q.isLoading) return <div className="p-10 text-muted">Loading chat…</div>;
-  if (!rows.length) return <Empty title="Nothing to show in this view" body={view === 'conversation' ? 'Switch to "Everything" to see tool calls and background records.' : 'This chat file has no readable records.'} />;
+  if (q.isError) return <Empty title="This chat couldn’t be loaded" body={(q.error as Error).message} />;
+  if (q.isLoading) return <LoadingChat />;
+  if (!rows.length)
+    return <Empty title="Nothing to show in this view" body={view === 'conversation' ? 'Switch to “Everything” to see background records.' : 'This chat file has no readable records.'} />;
 
   const ctxBase = { sessionId, onOpenSubSession: (id: string) => navigate({ sessionId: id, seq: undefined }) };
 
   return (
-    <div ref={scrollRef} onScroll={onScroll} className="scrollbar-thin relative h-full overflow-y-auto [overflow-anchor:none]" data-testid="conversation">
-      <div style={{ height: v.getTotalSize(), position: 'relative' }}>
-        {items.map((it) => {
-          const row = rows[it.index]!;
-          return (
-            <div key={it.key} data-index={it.index} ref={v.measureElement} className="absolute top-0 left-0 w-full" style={{ transform: `translateY(${it.start}px)` }}>
-              <div className="mx-auto max-w-[46rem] px-5 sm:px-8">
-                <RowView row={row} ctxBase={ctxBase} author={promptAuthor} showInjected={view === 'all'} highlight={seq != null && rowSeqs(row).includes(seq)} />
+    <>
+      <div ref={scrollRef} onScroll={onScroll} className="scroll-quiet relative h-full overflow-y-auto [overflow-anchor:none]" data-testid="conversation">
+        <div style={{ height: v.getTotalSize(), position: 'relative' }}>
+          {items.map((it) => {
+            const row = rows[it.index]!;
+            return (
+              <div key={it.key} data-index={it.index} ref={v.measureElement} className="absolute top-0 left-0 w-full" style={{ transform: `translateY(${it.start}px)` }}>
+                <div className="mx-auto max-w-[760px] px-5 sm:px-8 md:px-10">
+                  <RowView row={row} ctxBase={ctxBase} fromAgent={fromAgent} showInjected={view === 'all'} highlight={seq != null && rowSeqs(row).includes(seq)} />
+                </div>
               </div>
-            </div>
-          );
-        })}
+            );
+          })}
+        </div>
       </div>
-      <div className="pointer-events-none sticky bottom-4 flex justify-end gap-2 pr-4">
-        {q.hasPreviousPage || anchor.from > 0 ? (
-          <EdgeButton label="Jump to start" onClick={() => (navigate({ seq: undefined }, { replace: true }), setAnchor({ from: 0, dir: 'forward' }))} icon={<ArrowUpToLine size={15} />} />
-        ) : null}
-        {q.hasNextPage || (total != null && total > PAGE) ? (
-          <EdgeButton label="Jump to end" onClick={() => (navigate({ seq: undefined }, { replace: true }), setAnchor({ from: END, dir: 'backward' }))} icon={<ArrowDownToLine size={15} />} />
-        ) : null}
-      </div>
+      <Minimap sessionId={sessionId} current={currentSeq} onJump={jumpTo} />
+      {(!nearEnd || q.hasNextPage) && (
+        <button
+          type="button"
+          onClick={toBottom}
+          aria-label="Scroll to the end"
+          title="Scroll to the end"
+          className="animate-pop absolute bottom-5 left-1/2 z-10 flex size-9 -translate-x-1/2 items-center justify-center rounded-full border border-line bg-canvas text-muted shadow-pop transition-colors hover:text-ink dark:bg-raised"
+        >
+          <ArrowDown size={17} />
+        </button>
+      )}
+    </>
+  );
+}
+
+function estimate(r: Row): number {
+  switch (r.kind) {
+    case 'date':
+      return 56;
+    case 'activity':
+      return 36;
+    case 'divider':
+      return 56;
+    case 'prompt':
+      return 96;
+    default:
+      return 160;
+  }
+}
+
+function LoadingChat() {
+  return (
+    <div className="mx-auto max-w-[760px] space-y-8 px-5 pt-10 sm:px-8 md:px-10" role="status" aria-label="Loading chat">
+      {[0, 1].map((i) => (
+        <div key={i} className="space-y-3">
+          <div className="ml-auto h-10 w-2/5 animate-pulse rounded-[20px] bg-raised" />
+          <div className="h-3 w-1/3 animate-pulse rounded bg-hover" />
+          <div className="h-3 w-full animate-pulse rounded bg-hover" />
+          <div className="h-3 w-11/12 animate-pulse rounded bg-hover" />
+          <div className="h-3 w-3/5 animate-pulse rounded bg-hover" />
+        </div>
+      ))}
     </div>
   );
-}
-
-function EdgeButton({ label, onClick, icon }: { label: string; onClick: () => void; icon: React.ReactNode }) {
-  return (
-    <button type="button" title={label} aria-label={label} onClick={onClick} className="pointer-events-auto rounded-full border border-rule bg-surface p-2 text-muted shadow-sm hover:text-ink">
-      {icon}
-    </button>
-  );
-}
-
-function rowSeqs(r: Row): number[] {
-  return r.kind === 'activity' ? r.events.map((e) => e.seq) : [r.event.seq];
 }
 
 function Empty({ title, body }: { title: string; body?: string }) {
   return (
     <div className="flex h-full items-center justify-center p-10">
       <div className="max-w-sm text-center">
-        <p className="font-medium">{title}</p>
-        {body && <p className="mt-1 text-muted">{body}</p>}
+        <p className="text-[15px] font-medium">{title}</p>
+        {body && <p className="mt-1.5 text-[13.5px] text-muted">{body}</p>}
       </div>
     </div>
   );
@@ -172,36 +240,43 @@ function Empty({ title, body }: { title: string; body?: string }) {
 
 /* ------------------------------------------------------------------ */
 
-const RowView = memo(function RowView({ row, ctxBase, highlight, showInjected, author }: { row: Row; ctxBase: Omit<BlockCtx, 'seq'>; highlight: boolean; showInjected: boolean; author: string }) {
-  const hl = highlight ? 'rounded-lg ring-2 ring-mark ring-offset-4 ring-offset-paper' : '';
+const RowView = memo(function RowView({ row, ctxBase, highlight, showInjected, fromAgent }: { row: Row; ctxBase: Omit<BlockCtx, 'seq'>; highlight: boolean; showInjected: boolean; fromAgent: boolean }) {
   switch (row.kind) {
-    case 'prompt':
-      return <Prompt event={row.event} ctx={{ ...ctxBase, seq: row.event.seq }} className={hl} showInjected={showInjected} author={author} />;
-    case 'reply':
+    case 'date':
       return (
-        <div className={`pt-3 pb-4 ${row.event.offBranch ? 'opacity-55' : ''} ${hl}`}>
-          {row.event.offBranch && <OffBranch />}
-          <div className="space-y-3">
-            {row.event.blocks.map((b, i) => (
-              <BlockView key={i} block={b} ctx={{ ...ctxBase, seq: row.event.seq, results: row.results }} />
-            ))}
-          </div>
-        </div>
-      );
-    case 'divider':
-      return (
-        <div className={`my-6 flex items-center gap-3 text-[12px] text-faint ${hl}`}>
-          <span className="h-px flex-1 bg-rule" />
-          <span className="max-w-[70%] truncate" title={row.event.blocks.map((b) => (b.type === 'notice' ? b.text : '')).join(' ')}>
-            {row.event.blocks.map((b) => (b.type === 'notice' ? b.text : '')).join(' ')} {time(row.event.timestamp)}
+        <div className="flex justify-center pt-7 pb-3">
+          <span className="text-[12px] font-medium text-faint tabular-nums" title={fullDate(row.timestamp)}>
+            {separatorDate(row.timestamp)}
           </span>
-          <span className="h-px flex-1 bg-rule" />
         </div>
       );
+    case 'prompt':
+      return <Prompt event={row.event} ctx={{ ...ctxBase, seq: row.event.seq }} highlight={highlight} showInjected={showInjected} fromAgent={fromAgent} />;
+    case 'reply':
+      return <Reply event={row.event} ctx={{ ...ctxBase, seq: row.event.seq }} highlight={highlight} endOfTurn={!!row.endOfTurn} />;
+    case 'divider': {
+      const text = row.event.blocks.map((b) => (b.type === 'notice' ? b.text : '')).join(' ');
+      return (
+        <div className="flex items-center gap-3 py-5 text-[12px] text-faint">
+          <span className="h-px flex-1 bg-line" />
+          <span className={`max-w-[75%] truncate ${highlight ? 'text-ink' : ''}`} title={text}>
+            {text}
+            {row.event.timestamp ? ` · ${time(row.event.timestamp)}` : ''}
+          </span>
+          <span className="h-px flex-1 bg-line" />
+        </div>
+      );
+    }
     case 'activity':
-      return <Activity row={row} ctxBase={ctxBase} className={hl} defaultOpen={highlight} />;
+      return <Activity row={row} ctxBase={ctxBase} defaultOpen={highlight} />;
   }
 });
+
+function highlightCls(on: boolean) {
+  return on ? 'rounded-2xl bg-mark-soft/60 -mx-3 px-3 sm:-mx-4 sm:px-4' : '';
+}
+
+/* ---------------- prompts ---------------- */
 
 const PASTE_RE = /<pasted_content(?:\s+id="[^"]*")?>\n?([\s\S]*?)\n?<\/pasted_content(?:\s+id="[^"]*")?>/g;
 
@@ -227,48 +302,123 @@ function splitPasted(text: string): { kind: 'typed' | 'pasted'; text: string }[]
 }
 
 function PastedText({ text, truncated }: { text: string; truncated?: { fullLength: number } }) {
+  const [open, setOpen] = useState(false);
   const lines = text.split('\n').length;
   return (
-    <Disclosure summary={<span className="inline-flex items-center gap-1.5"><ClipboardPaste size={13} /> Pasted text <span className="text-faint">{truncated ? `${bytes(truncated.fullLength)} in total` : `${lines} lines, ${bytes(text.length)}`}</span></span>}>
-      {() => (
-        <div className="rounded-md border border-rule bg-surface p-3 text-ink [&_.prose-msg]:font-serif [&_.prose-msg]:text-[14.5px] [&_.prose-msg]:font-normal">
+    <div className="my-1">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        className="inline-flex max-w-full items-center gap-2 rounded-xl bg-canvas/70 px-2.5 py-1.5 text-left text-[12.5px] ring-1 ring-line transition-colors hover:ring-line-strong dark:bg-black/15"
+      >
+        <ClipboardPaste size={14} className="shrink-0 text-muted" />
+        <span className="font-medium">Pasted text</span>
+        <span className="text-faint">{truncated ? `${bytes(truncated.fullLength)} in total` : `${plural(lines, 'line')} · ${bytes(text.length)}`}</span>
+        <ChevronRight size={13} className={`shrink-0 text-faint transition-transform ${open ? 'rotate-90' : ''}`} />
+      </button>
+      {open && (
+        <div className="scroll-quiet mt-2 max-h-[28rem] overflow-y-auto rounded-xl bg-canvas/70 px-3.5 py-3 ring-1 ring-line dark:bg-black/15 [&_.prose-msg]:text-[13.5px]">
           <Markdown text={text} />
-          {truncated && <p className="mt-2 font-sans text-[13px] text-faint">Showing the first part. Export the chat to read the whole paste.</p>}
+          {truncated && <p className="mt-2 text-[12.5px] text-faint">Showing the first part. Export the chat to read the whole paste.</p>}
         </div>
       )}
-    </Disclosure>
+    </div>
   );
 }
 
-function Prompt({ event, ctx, className, showInjected, author }: { event: ChatEvent; ctx: BlockCtx; className: string; showInjected: boolean; author: string }) {
+const CLAMP_LINES = 12;
+const CLAMP_CHARS = 1100;
+
+function TypedText({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  const long = text.length > CLAMP_CHARS || text.split('\n').length > CLAMP_LINES;
   return (
-    <div id={`seq-${event.seq}`} className={`pt-8 pb-3 ${event.offBranch ? 'opacity-55' : ''} ${className}`}>
+    <div>
+      <div className={`whitespace-pre-wrap ${long && !open ? 'fade-bottom max-h-[300px] overflow-hidden' : ''}`}>{text}</div>
+      {long && (
+        <button type="button" onClick={() => setOpen((o) => !o)} className="mt-1 text-[13px] font-medium text-muted hover:text-ink">
+          {open ? 'Show less' : 'Show more'}
+        </button>
+      )}
+    </div>
+  );
+}
+
+function FullPrompt({ ctx }: { ctx: BlockCtx }) {
+  const q = useQuery({ queryKey: ['event', ctx.sessionId, ctx.seq], queryFn: () => api.event(ctx.sessionId, ctx.seq) });
+  if (!q.data) return <span className="text-[13px] text-faint">Loading…</span>;
+  return <PromptText blocks={q.data.blocks} />;
+}
+
+function PromptText({ blocks, ctx }: { blocks: Block[]; ctx?: BlockCtx }) {
+  const [full, setFull] = useState(false);
+  if (full && ctx) return <FullPrompt ctx={ctx} />;
+  return (
+    <>
+      {blocks.map((b, i) => {
+        if (b.type !== 'text' || !b.text.trim()) return null;
+        return (
+          <div key={i} className="space-y-1">
+            {splitPasted(b.text).map((part, j) => (part.kind === 'pasted' ? <PastedText key={j} text={part.text} truncated={b.truncated} /> : <TypedText key={j} text={part.text} />))}
+            {b.truncated && !b.text.includes('<pasted_content') && ctx && (
+              <button type="button" onClick={() => setFull(true)} className="text-[13px] font-medium text-muted hover:text-ink">
+                Show the full text ({bytes(b.truncated.fullLength)})
+              </button>
+            )}
+          </div>
+        );
+      })}
+    </>
+  );
+}
+
+function promptCopyText(blocks: Block[]) {
+  return blocks
+    .filter((b): b is Extract<Block, { type: 'text' }> => b.type === 'text')
+    .map((b) => b.text.replace(PASTE_RE, (_m, inner: string) => inner))
+    .join('\n\n');
+}
+
+function Prompt({ event, ctx, highlight, showInjected, fromAgent }: { event: ChatEvent; ctx: BlockCtx; highlight: boolean; showInjected: boolean; fromAgent: boolean }) {
+  const images = event.blocks.filter((b) => b.type === 'image' || b.type === 'document');
+  const injected = event.blocks.filter((b) => b.type === 'notice' && b.kind === 'injected');
+  const other = event.blocks.filter((b) => b.type !== 'text' && b.type !== 'image' && b.type !== 'document' && !(b.type === 'notice' && b.kind === 'injected'));
+  const hasText = event.blocks.some((b) => b.type === 'text' && b.text.trim());
+  return (
+    <div id={`seq-${event.seq}`} className={`group/msg flex flex-col items-end pt-5 pb-3 ${event.offBranch ? 'opacity-55' : ''} ${highlightCls(highlight)}`}>
       {event.offBranch && <OffBranch />}
-      <div className="relative border-l-[3px] border-prompt pl-4">
-        <div className="mb-1 text-[12px] text-faint" title={fullDate(event.timestamp)}>
-          {author} · {time(event.timestamp)}
+      {fromAgent && <div className="mb-1.5 text-[11.5px] font-medium text-faint">Instructions from the main agent</div>}
+      {images.length > 0 && (
+        <div className="mb-2 flex max-w-[85%] flex-wrap justify-end gap-2">
+          {images.map((b, i) => (b.type === 'image' ? <ImageView key={i} block={b} ctx={ctx} small /> : <BlockView key={i} block={b} ctx={ctx} />))}
         </div>
-        <div className="space-y-2 text-prompt [&_.prose-msg]:font-sans [&_.prose-msg]:text-[16px] [&_.prose-msg]:leading-relaxed [&_.prose-msg]:font-[520]">
-          {event.blocks.map((b, i) => {
-            if (b.type === 'notice' && b.kind === 'injected') {
-              return showInjected ? (
-                <Disclosure key={i} summary={<span className="text-faint">Context added by the app</span>}>
-                  {() => <pre className="code-block whitespace-pre-wrap">{b.text}</pre>}
-                </Disclosure>
-              ) : null;
-            }
-            if (b.type === 'text' && b.text.includes('<pasted_content')) {
-              return (
-                <div key={i} className="space-y-2">
-                  {splitPasted(b.text).map((part, j) =>
-                    part.kind === 'pasted' ? <PastedText key={j} text={part.text} truncated={b.truncated} /> : <BlockView key={j} block={{ type: 'text', text: part.text }} ctx={ctx} />,
-                  )}
-                </div>
-              );
-            }
-            return <BlockView key={i} block={b} ctx={ctx} />;
-          })}
+      )}
+      {hasText && (
+        <div className="max-w-[min(85%,620px)] min-w-0 rounded-[20px] bg-raised px-4 py-2.5 text-[15px] leading-[1.6] text-ink [overflow-wrap:anywhere]">
+          <PromptText blocks={event.blocks} ctx={ctx} />
         </div>
+      )}
+      {other.length > 0 && (
+        <div className="mt-2 flex max-w-[85%] flex-col items-end gap-1.5">
+          {other.map((b, i) => (
+            <BlockView key={i} block={b} ctx={ctx} />
+          ))}
+        </div>
+      )}
+      {showInjected &&
+        injected.map((b, i) => (
+          <div key={i} className="mt-2 w-full max-w-[85%]">
+            <Disclosure summary={<span className="text-[12.5px]">Context the app added to this message</span>}>
+              {() => <pre className="code-block max-h-80 overflow-auto whitespace-pre-wrap">{b.type === 'notice' ? b.text : ''}</pre>}
+            </Disclosure>
+          </div>
+        ))}
+      <div className="reveal mt-1 flex h-7 items-center gap-0.5 text-[11.5px] text-faint">
+        <span className="px-1 tabular-nums" title={fullDate(event.timestamp)}>
+          {time(event.timestamp)}
+        </span>
+        {hasText && <CopyButton text={() => promptCopyText(event.blocks)} label="Copy message" />}
       </div>
     </div>
   );
@@ -276,54 +426,105 @@ function Prompt({ event, ctx, className, showInjected, author }: { event: ChatEv
 
 function OffBranch() {
   return (
-    <div className="mb-1 inline-flex items-center gap-1 text-[12px] text-faint">
+    <div className="mb-1.5 inline-flex items-center gap-1 text-[11.5px] text-faint">
       <GitBranch size={12} /> Earlier version, replaced by an edit or retry
     </div>
   );
 }
 
-function Activity({ row, ctxBase, className, defaultOpen }: { row: Extract<Row, { kind: 'activity' }>; ctxBase: Omit<BlockCtx, 'seq'>; className: string; defaultOpen: boolean }) {
+/* ---------------- replies ---------------- */
+
+function Reply({ event, ctx, highlight, endOfTurn }: { event: ChatEvent; ctx: BlockCtx; highlight: boolean; endOfTurn: boolean }) {
+  const text = event.blocks
+    .filter((b): b is Extract<Block, { type: 'text' }> => b.type === 'text')
+    .map((b) => b.text)
+    .join('\n\n');
+  return (
+    <div className={`group/msg py-2.5 ${event.offBranch ? 'opacity-55' : ''} ${highlightCls(highlight)}`}>
+      {event.offBranch && <OffBranch />}
+      <div className="space-y-3">
+        {event.blocks.map((b, i) => (
+          <BlockView key={i} block={b} ctx={ctx} />
+        ))}
+      </div>
+      {endOfTurn && (
+        <div className="reveal mt-1.5 -ml-1.5 flex h-7 items-center gap-0.5 text-[11.5px] text-faint">
+          {text && <CopyButton text={text} label="Copy reply" />}
+          <span className="px-1 tabular-nums" title={fullDate(event.timestamp)}>
+            {time(event.timestamp)}
+          </span>
+          {event.model && <span className="px-1">· {event.model}</span>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ---------------- agent work ---------------- */
+
+function Activity({ row, ctxBase, defaultOpen }: { row: Extract<Row, { kind: 'activity' }>; ctxBase: Omit<BlockCtx, 'seq'>; defaultOpen: boolean }) {
   const [open, setOpen] = useState(defaultOpen);
-  const s = useMemo(() => activitySummary(row.events), [row.events]);
-  const toolCount = [...s.tools.values()].reduce((a, b) => a + b, 0);
-  const parts: string[] = [];
-  if (toolCount) {
-    const names = [...s.tools.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([n, c]) => (c > 1 ? `${toolName(n).name} ×${c}` : toolName(n).name));
-    parts.push(`${toolCount} tool ${toolCount === 1 ? 'call' : 'calls'}: ${names.join(', ')}${s.tools.size > 3 ? ', …' : ''}`);
-  }
-  if (s.thinking) parts.push('thinking');
-  if (s.meta && !toolCount && !s.thinking) parts.push(`${s.meta} background ${s.meta === 1 ? 'record' : 'records'}`);
-  if (!parts.length) parts.push(`${row.events.length} ${row.events.length === 1 ? 'item' : 'items'}`);
+  const s = useMemo(() => summarize(row.events), [row.events]);
+  const firstTool = useMemo(() => {
+    for (const e of row.events) for (const b of e.blocks) if (b.type === 'tool_use') return b.name;
+    return undefined;
+  }, [row.events]);
+  const Icon = firstTool ? kindIcon(firstTool) : Brain;
+  const onlyMeta = s.calls === 0 && s.thinking === 0;
+  const dur = row.durationMs != null && row.durationMs >= 2000 ? duration(row.durationMs) : undefined;
 
   // A tool_use's result is shown under the call; don't render it twice.
-  const pairedIds = new Set<string>();
-  for (const e of row.events) for (const b of e.blocks) if (b.type === 'tool_use' && row.results.has(b.id)) pairedIds.add(b.id);
+  const paired = useMemo(() => {
+    const ids = new Set<string>();
+    for (const e of row.events) for (const b of e.blocks) if (b.type === 'tool_use' && row.results.has(b.id)) ids.add(b.id);
+    return ids;
+  }, [row]);
 
   return (
-    <div className={`py-1 ${className}`}>
-      <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open} className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-left text-[13px] text-muted hover:bg-sunken">
-        <Wrench size={13} className="shrink-0 text-faint" />
-        <span className="min-w-0 flex-1 truncate">{parts.join(' · ')}</span>
-        {s.errors > 0 && <span className="shrink-0 text-error">{s.errors} failed</span>}
-        {s.images > 0 && (
-          <span className="inline-flex shrink-0 items-center gap-1 text-faint">
-            <Images size={13} /> {s.images}
+    <div className="py-1">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        className={`group -mx-2 flex max-w-[calc(100%+16px)] min-w-0 items-center gap-2 rounded-lg px-2 py-1 text-left text-[13.5px] transition-colors hover:bg-hover ${onlyMeta ? 'text-faint' : 'text-muted'} hover:text-ink`}
+      >
+        <Icon size={14} className="shrink-0 opacity-80" strokeWidth={1.9} />
+        <span className="min-w-0 truncate">{sentence(s.phrases)}</span>
+        {(s.added > 0 || s.removed > 0) && (
+          <span className="shrink-0 font-mono text-[12px] tabular-nums">
+            {s.added > 0 && <span className="text-ok">+{s.added}</span>}
+            {s.added > 0 && s.removed > 0 && ' '}
+            {s.removed > 0 && <span className="text-error">−{s.removed}</span>}
           </span>
         )}
+        {s.errors > 0 && <span className="shrink-0 text-error">· {s.errors} failed</span>}
+        {s.images > 0 && (
+          <span className="inline-flex shrink-0 items-center gap-1 text-faint">
+            · <Images size={13} /> {s.images}
+          </span>
+        )}
+        {dur && <span className="shrink-0 text-faint tabular-nums">· {dur}</span>}
+        <ChevronRight size={14} className={`shrink-0 text-faint transition-transform ${open ? 'rotate-90' : ''}`} />
       </button>
       {open && (
-        <div className="mt-1 ml-3 space-y-1 border-l border-rule pl-3">
+        <div className="mt-1.5 mb-2 overflow-hidden rounded-xl border border-line">
           {row.events.map((e) =>
             e.blocks
-              .filter((b) => !(b.type === 'tool_result' && pairedIds.has(b.toolUseId)))
-              .map((b, i) => (
-                <div key={`${e.seq}-${i}`} className={e.visibility === 'meta' ? 'opacity-75' : ''}>
-                  <BlockView block={b} ctx={{ ...ctxBase, seq: e.seq, results: row.results }} />
-                </div>
-              )),
+              .filter((b) => !(b.type === 'tool_result' && paired.has(b.toolUseId)) && !((b.type === 'thinking' || b.type === 'text') && !b.text.trim()))
+              .map((b, i) => {
+                const padded = b.type !== 'tool_use' && b.type !== 'thinking' && b.type !== 'tool_result';
+                return (
+                  <div key={`${e.seq}-${i}`} className={`border-b border-line last:border-b-0 ${e.visibility === 'meta' ? 'bg-hover/50' : ''}`}>
+                    <div className={padded ? 'px-3 py-2.5 [&_.prose-msg]:text-[13.5px]' : ''}>
+                      <BlockView block={b} ctx={{ ...ctxBase, seq: e.seq, results: row.results }} />
+                    </div>
+                  </div>
+                );
+              }),
           )}
         </div>
       )}
     </div>
   );
 }
+
