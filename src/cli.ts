@@ -1,14 +1,14 @@
 #!/usr/bin/env node
-import { randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { mkdir, rm } from 'node:fs/promises';
-import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { serve } from '@hono/node-server';
 import type { ServerType } from '@hono/node-server';
 import type { SourceId } from './core/types.ts';
+import { cacheDir as defaultCacheDir } from './index/paths.ts';
 import type { Adapter } from './server/events.ts';
+import { loadOrCreateToken } from './server/token.ts';
 
 const MIN_NODE = [22, 13] as const;
 
@@ -26,6 +26,7 @@ Options:
   --codex-root <p>    Override roots for the codex adapter (repeatable)
   --cache-dir <path>  Where to keep the index cache
   --reindex           Delete the cache database and rebuild it
+  --reset-token       Issue a new access token (open the new link; old links stop working)
   --version           Print version
   --help              Show this help
 `;
@@ -48,16 +49,6 @@ function readVersion(): string {
   } catch {
     return '0.0.0';
   }
-}
-
-function defaultCacheDir(): string {
-  const env = process.env.AGENT_HISTORY_CACHE;
-  if (env) return env;
-  if (process.platform === 'darwin') return join(homedir(), 'Library', 'Caches', 'agent-history');
-  if (process.platform === 'win32') {
-    return join(process.env.LOCALAPPDATA ?? join(homedir(), 'AppData', 'Local'), 'agent-history');
-  }
-  return join(process.env.XDG_CACHE_HOME ?? join(homedir(), '.cache'), 'agent-history');
 }
 
 function tryListen(
@@ -88,6 +79,7 @@ async function main(): Promise<void> {
         'codex-root': { type: 'string', multiple: true },
         'cache-dir': { type: 'string' },
         reindex: { type: 'boolean', default: false },
+        'reset-token': { type: 'boolean', default: false },
         help: { type: 'boolean', short: 'h', default: false },
         version: { type: 'boolean', short: 'v', default: false },
       },
@@ -129,7 +121,7 @@ async function main(): Promise<void> {
   const allowedRoots = [...new Set([...roots.values()].flat())];
 
   const cacheDir = resolve(values['cache-dir'] ?? defaultCacheDir());
-  await mkdir(cacheDir, { recursive: true });
+  await mkdir(cacheDir, { recursive: true, mode: 0o700 });
   const dbPath = join(cacheDir, 'index.db');
   if (values.reindex) {
     for (const suffix of ['', '-wal', '-shm']) await rm(dbPath + suffix, { force: true });
@@ -138,7 +130,7 @@ async function main(): Promise<void> {
   const indexer = await startIndexer({ dbPath, adapters: [...adapters.values()], roots });
   const store = indexer.store;
 
-  const token = randomBytes(32).toString('base64url');
+  const token = loadOrCreateToken(cacheDir, values['reset-token']);
   const devToken = values.dev ? process.env.AGENT_HISTORY_DEV_TOKEN : undefined;
 
   let server: ServerType | undefined;
