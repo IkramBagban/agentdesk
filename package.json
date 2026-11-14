@@ -13,6 +13,14 @@
     "local-first"
   ],
   "author": "IkramBagban",
+  "homepage": "https://github.com/IkramBagban/agentdesk#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/IkramBagban/agentdesk.git"
+  },
+  "bugs": {
+    "url": "https://github.com/IkramBagban/agentdesk/issues"
+  },
   "license": "MIT",
   "type": "module",
   "bin": {
