@@ -79,7 +79,9 @@ function observe(st: State, rec: Rec): void {
       if (typeof p.cwd === 'string') st.cwd ??= p.cwd;
       if (typeof p.timestamp === 'string') st.startedAt = p.timestamp;
       addModel(st, p.model);
-      if (isObj(p.git) && typeof p.git.branch === 'string') st.gitBranch ??= p.git.branch;
+      if (isObj(p.git) && typeof p.git.branch === 'string' && p.git.branch && p.git.branch !== 'HEAD') {
+        st.gitBranch ??= p.git.branch;
+      }
       const src = p.source;
       if (isObj(src)) {
         const sub = isObj(src.subagent) ? src.subagent : undefined;

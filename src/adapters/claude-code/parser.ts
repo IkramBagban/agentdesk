@@ -117,7 +117,7 @@ export class ClaudeCodeParser implements SessionParser {
     const cwd = str(rec.cwd);
     if (cwd && st.projectPath === undefined) st.projectPath = cwd;
     const branch = str(rec.gitBranch);
-    if (branch) st.gitBranch = branch;
+    if (branch && branch !== 'HEAD') st.gitBranch = branch; // 'HEAD' = detached / no branch
 
     switch (str(rec.type)) {
       case 'custom-title': {

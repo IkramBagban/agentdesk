@@ -15,7 +15,7 @@ const parseLine: ParseLine = (line: RawLine, firstSeq: number, _file: Discovered
 export const claudeCodeAdapter: SourceAdapter & { parseLine: ParseLine } = {
   id: 'claude-code',
   displayName: 'Claude Code',
-  parserVersion: '2',
+  parserVersion: '3',
   defaultRoots() {
     const dir = process.env.CLAUDE_CONFIG_DIR;
     return [dir ? join(dir, 'projects') : join(homedir(), '.claude', 'projects')];
