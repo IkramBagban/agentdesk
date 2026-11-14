@@ -349,10 +349,10 @@ describe('misc', () => {
     expect(d2.prepare('SELECT version FROM schema_version').get()).toEqual({ version: SCHEMA_VERSION });
   });
 
-  it('cacheDir honours AGENT_HISTORY_CACHE and platform defaults', () => {
-    expect(cacheDir({ AGENT_HISTORY_CACHE: '/c' }, 'linux')).toBe('/c');
-    expect(cacheDir({ XDG_CACHE_HOME: '/xdg' }, 'linux')).toBe('/xdg/agent-history');
-    expect(cacheDir({ LOCALAPPDATA: 'C:\\L' }, 'win32')).toContain('agent-history');
+  it('cacheDir honours AGENTDESK_CACHE and platform defaults', () => {
+    expect(cacheDir({ AGENTDESK_CACHE: '/c' }, 'linux')).toBe('/c');
+    expect(cacheDir({ XDG_CACHE_HOME: '/xdg' }, 'linux')).toBe('/xdg/agentdesk');
+    expect(cacheDir({ LOCALAPPDATA: 'C:\\L' }, 'win32')).toContain('agentdesk');
     expect(cacheDir({}, 'darwin')).toContain('Library');
   });
 

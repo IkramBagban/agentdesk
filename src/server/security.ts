@@ -6,7 +6,7 @@ import { getCookie, setCookie } from 'hono/cookie';
  * Cookies are scoped by host, not port: include the port so two instances (or
  * another app on 127.0.0.1) never overwrite each other's token.
  */
-export const cookieName = (port: number): string => `ah_token_${port}`;
+export const cookieName = (port: number): string => `agentdesk_token_${port}`;
 
 export const CSP =
   "default-src 'self'; img-src 'self' blob: data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; object-src 'none'; frame-ancestors 'none'";

@@ -95,7 +95,7 @@ describe('auth', () => {
 
   it('sets a long-lived, port-scoped cookie', async () => {
     const c = (await get(`/?t=${TOKEN}`, {})).headers.get('set-cookie') ?? '';
-    expect(c).toContain(`ah_token_${PORT}=${TOKEN}`);
+    expect(c).toContain(`agentdesk_token_${PORT}=${TOKEN}`);
     expect(c).toMatch(/Max-Age=\d{6,}/);
   });
 

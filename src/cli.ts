@@ -12,9 +12,9 @@ import { loadOrCreateToken } from './server/token.ts';
 
 const MIN_NODE = [22, 13] as const;
 
-const HELP = `agent-history - browse local coding-agent chat history
+const HELP = `agentdesk - read your coding-agent conversations in a local viewer
 
-Usage: agent-history [options]
+Usage: agentdesk [options]
 
 Options:
   --port <n>          Port to listen on (default 4782; tries the next 20 if busy)
@@ -35,7 +35,7 @@ function checkNode(): void {
   const [maj = 0, min = 0] = process.versions.node.split('.').map(Number);
   if (maj < MIN_NODE[0] || (maj === MIN_NODE[0] && min < MIN_NODE[1])) {
     console.error(
-      `agent-history needs Node ${MIN_NODE[0]}.${MIN_NODE[1]} or newer (you have ${process.versions.node}).\n` +
+      `agentdesk needs Node ${MIN_NODE[0]}.${MIN_NODE[1]} or newer (you have ${process.versions.node}).\n` +
         'Please upgrade Node: https://nodejs.org/',
     );
     process.exit(1);
@@ -131,7 +131,7 @@ async function main(): Promise<void> {
   const store = indexer.store;
 
   const token = loadOrCreateToken(cacheDir, values['reset-token']);
-  const devToken = values.dev ? process.env.AGENT_HISTORY_DEV_TOKEN : undefined;
+  const devToken = values.dev ? process.env.AGENTDESK_DEV_TOKEN : undefined;
 
   let server: ServerType | undefined;
   let port = basePort;
@@ -158,8 +158,8 @@ async function main(): Promise<void> {
   }
 
   const url = `http://127.0.0.1:${port}/?t=${token}`;
-  console.log(`agent-history ${version} running at:\n\n  ${url}\n`);
-  if (devToken) console.log('Dev token from AGENT_HISTORY_DEV_TOKEN is accepted.');
+  console.log(`agentdesk ${version} running at:\n\n  ${url}\n`);
+  if (devToken) console.log('Dev token from AGENTDESK_DEV_TOKEN is accepted.');
   if (!values['no-open']) {
     try {
       const { default: open } = await import('open');

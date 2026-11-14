@@ -145,12 +145,12 @@ describe('security', () => {
     expect(res.status).toBe(302);
     expect(res.headers.get('location')).toBe('/');
     const cookie = res.headers.get('set-cookie') ?? '';
-    expect(cookie).toContain(`ah_token_${PORT}=${TOKEN}`);
+    expect(cookie).toContain(`agentdesk_token_${PORT}=${TOKEN}`);
     expect(cookie).toMatch(/HttpOnly/i);
     expect(cookie).toMatch(/SameSite=Strict/i);
     expect(cookie).toMatch(/Path=\//);
-    expect((await req('/api/status', { Cookie: `ah_token_${PORT}=${TOKEN}` })).status).toBe(200);
-    expect((await req('/api/status', { Cookie: `ah_token_9999=${TOKEN}` })).status).toBe(401);
+    expect((await req('/api/status', { Cookie: `agentdesk_token_${PORT}=${TOKEN}` })).status).toBe(200);
+    expect((await req('/api/status', { Cookie: `agentdesk_token_9999=${TOKEN}` })).status).toBe(401);
   });
 
   it('does not set a cookie for a wrong token', async () => {
