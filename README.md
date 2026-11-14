@@ -1,11 +1,11 @@
-# agent-history
+# agentdesk
 
 Read every conversation you've had with your coding agents (Claude Code and
 Codex, with more to come) in a fast, private viewer that runs on your own
 computer.
 
 ```bash
-npx agent-history
+npx agentdesk
 ```
 
 It finds your history, indexes it, and opens the viewer in your browser.
@@ -45,8 +45,8 @@ Node.js 22.13 or newer. If you use Claude Code, you already have Node.
 | Claude Code | `~/.claude/projects` (or `$CLAUDE_CONFIG_DIR/projects`) |
 | Codex | `~/.codex/sessions` and `~/.codex/archived_sessions` (or under `$CODEX_HOME`) |
 
-The search index lives in `~/Library/Caches/agent-history` on macOS,
-`~/.cache/agent-history` on Linux, and `%LOCALAPPDATA%\agent-history` on
+The search index lives in `~/Library/Caches/agentdesk` on macOS,
+`~/.cache/agentdesk` on Linux, and `%LOCALAPPDATA%\agentdesk` on
 Windows.
 
 ## Options
@@ -73,7 +73,7 @@ pnpm build          # builds dist/cli.js, dist/worker.js and dist/web
 node dist/cli.js
 ```
 
-For live UI development, run `AGENT_HISTORY_DEV_TOKEN=dev-token pnpm dev`, which starts
+For live UI development, run `AGENTDESK_DEV_TOKEN=dev-token pnpm dev`, which starts
 the server on port 4782 and Vite on port 5173.
 
 How it works, and how to add support for another agent, is in

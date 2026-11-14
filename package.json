@@ -1,10 +1,11 @@
 {
-  "name": "agent-history",
+  "name": "agentdesk",
   "version": "0.1.0",
-  "description": "Browse your local coding-agent chat history (Claude Code, Codex) in a fast local UI.",
+  "description": "One local desk for your coding agents: read every Claude Code and Codex conversation in a fast, private viewer.",
   "keywords": [
     "claude-code",
     "codex",
+    "coding-agents",
     "chat-history",
     "transcripts",
     "viewer",
@@ -15,7 +16,7 @@
   "license": "MIT",
   "type": "module",
   "bin": {
-    "agent-history": "./dist/cli.js"
+    "agentdesk": "./dist/cli.js"
   },
   "files": [
     "dist",

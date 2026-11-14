@@ -1,8 +1,8 @@
-# agent-history — spec
+# agentdesk — spec
 
 A local, read-only viewer for coding-agent chat history (Claude Code first,
 Codex next, others later). Runs entirely on the user's machine:
-`npx agent-history` → indexes local history → serves a UI on 127.0.0.1.
+`npx agentdesk` → indexes local history → serves a UI on 127.0.0.1.
 No accounts, no remote server, no telemetry.
 
 ## Principles
@@ -79,9 +79,9 @@ to `dist/web/`.
 
 ## Index (SQLite, `node:sqlite`)
 
-Cache location: `$AGENT_HISTORY_CACHE` or `~/Library/Caches/agent-history`
-(mac), `$XDG_CACHE_HOME/agent-history` or `~/.cache/agent-history` (linux),
-`%LOCALAPPDATA%\agent-history` (windows). File `index.db`. WAL mode.
+Cache location: `$AGENTDESK_CACHE` or `~/Library/Caches/agentdesk`
+(mac), `$XDG_CACHE_HOME/agentdesk` or `~/.cache/agentdesk` (linux),
+`%LOCALAPPDATA%\agentdesk` (windows). File `index.db`. WAL mode.
 Contains a `schema_version`; on mismatch the DB is deleted and rebuilt.
 
 Tables (indicative):
