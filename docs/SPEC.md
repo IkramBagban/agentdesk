@@ -85,20 +85,36 @@ Cache location: `$AGENTDESK_CACHE` or `~/Library/Caches/agentdesk`
 Contains a `schema_version`; on mismatch the DB is deleted and rebuilt.
 
 Tables (indicative):
-- `files(path PK, source_id, size, mtime_ms, indexed_size, parser_state JSON, parser_version, error_count)`
+- `files(path PK, source_id, size, mtime_ms, indexed_size, indexed_lines, tail_hash, sidecar_mtime, parser_state JSON, parser_version, error_count, error)`
 - `sessions(id PK, source_id, native_id, file_path, project_key, project_path, title, first_prompt, started_at, updated_at, event_count, message_count, image_count, models JSON, cost_usd, input_tokens, output_tokens, git_branch, parent_session_id, parent_tool_use_id, agent_description, links JSON)`
-- `events(session_id, seq, line, offset, length, role, visibility, ts, off_branch, preview, has_image, tool_names, PRIMARY KEY(session_id, seq))`
+- `events(id, session_id, seq, line, line_first_seq, offset, length, role, visibility, synthetic, ts, off_branch, preview, dkey)`
+  — `preview` only for conversation events (outline, snippet fallback);
+  `dkey` = 64-bit hash of (source, record uuid, index within line), used to
+  collapse copies of the same record across forked/resumed sessions.
 - `tool_links(session_id, tool_use_id, sub_session_id)`
-- `events_fts` (FTS5: `text`, with `session_id`/`seq` UNINDEXED). Text per
-  event capped (~16 KB); no base64 ever indexed.
+- `events_fts` — **contentless** FTS5 (`content=''`, `contentless_delete=1`),
+  rowid = `events.id`. Meta events are not indexed. Text capped per event
+  (16 KB conversation, 6 KB detail); base64-looking strings skipped. The
+  server rebuilds snippets from the source event (`src/index/snippet.ts`).
+
+Project keys are agent-agnostic: `path:<normalized abs path>` when the
+working directory is known (Claude Code and Codex in the same folder share
+a project), `nofolder:` for Claude desktop scratch workspaces, otherwise the
+adapter's own key. Two files with the same session id get distinct ids
+(`id~<pathhash8>` for the later one).
+
+Search ranking: bm25 × boost (human prompt 3.0, other conversation 2.5,
+tool output 1.0); one hit per `dkey`, preferring the on-branch copy, then
+the most recently updated session. Query length capped at 500 chars.
 
 Incremental rules per file:
 - unchanged size+mtime → skip
 - grown and parser_version same → resume parser from `parser_state`, read from `indexed_size`
+- prefix changed (tail hash mismatch) or sidecar (`.meta.json`) changed → full re-index
 - otherwise → delete that file's rows and re-index fully
 - file deleted → delete its rows
 
-Indexing runs in a `worker_thread`; the main thread serves requests from
+Indexing runs in a `worker_thread` (restarted up to 3 times with backoff if it crashes); the main thread serves requests from
 whatever is indexed so far and pushes progress over SSE. A file watcher
 (`fs.watch` recursive, debounced) re-queues changed files.
 
@@ -116,7 +132,8 @@ All under `/api`, JSON unless noted. Pagination via `cursor` (opaque) + `limit`.
 | `GET /api/sessions/:id/events/:seq` | single full `ChatEvent` (no truncation, still no base64) |
 | `GET /api/sessions/:id/blob?seq=&path=` | raw bytes with correct Content-Type, `Cache-Control: private, max-age=31536000, immutable` |
 | `GET /api/file?path=` | text of a referenced file (tool outputs etc.), only if inside an allowed root; max 5 MB |
-| `GET /api/search?q=&source=&project=&cursor=&limit=30` | `{items:[{sessionId, seq, snippet, sessionTitle, timestamp}], nextCursor?}` (FTS5 `snippet()` with `<mark>`… escaped otherwise) |
+| `GET /api/sessions/:id/outline` | human prompts `[{seq, preview, timestamp, offBranch}]` for the outline spine |
+| `GET /api/search?q=&source=&project=&cursor=&limit=30` | `{items:[{sessionId, seq, snippet, sessionTitle, projectKey, projectPath, role, timestamp}], nextCursor?}` — snippet is HTML-escaped except `<mark>` |
 | `GET /api/sessions/:id/export.md` | Markdown export (text/markdown, attachment) |
 | `GET /api/stream` | SSE: `index-progress`, `session-updated {id}` |
 
@@ -125,15 +142,22 @@ Session ids contain `:` — URL-encode them.
 ## Security
 
 - Bind `127.0.0.1` only (configurable port, default 4782, falls back to free port).
-- Random 32-byte token generated per run. Browser opens `/?t=<token>`; server
-  sets cookie `ah_token` (HttpOnly, SameSite=Strict, Path=/) and redirects to `/`.
-  Every `/api` request requires the cookie (or `Authorization: Bearer`).
+- Random 32-byte token, persisted in `<cache>/token` (0600, cache dir 0700) so
+  the browser keeps working across restarts; `--reset-token` rotates it.
+  Browser opens `/?t=<token>`; server sets cookie `agentdesk_token_<port>`
+  (HttpOnly, SameSite=Strict, Path=/, Max-Age 400 days) and redirects to `/`.
+  Every `/api` request requires the cookie (or `Authorization: Bearer`);
+  failures return 401 JSON `{error:'unauthorized'}`.
 - Reject requests whose `Host` header isn't `127.0.0.1:<port>` / `localhost:<port>`
   (DNS-rebinding defence). No CORS headers.
 - CSP on the HTML: `default-src 'self'; img-src 'self' blob: data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; object-src 'none'; frame-ancestors 'none'`.
 - Chat content is untrusted: UI renders Markdown without raw HTML; never `dangerouslySetInnerHTML` except FTS snippets that the server has escaped.
-- `/api/file` and blob reads resolve real paths and must stay within the
-  adapter roots (or the referenced file's recorded path, read-only, size-capped).
+- `/api/file` resolves real paths and must stay within the adapter roots
+  (text only, ≤ 5 MB). Blobs are served inline only for png, jpeg, gif, webp,
+  avif, bmp, svg and pdf, always with `Content-Security-Policy: sandbox`;
+  anything else is an `application/octet-stream` attachment. Image files a
+  chat references outside the roots are served only if their real path has a
+  raster-image extension and is ≤ 25 MB.
 
 ## UI
 
