@@ -24,7 +24,7 @@
   "license": "MIT",
   "type": "module",
   "bin": {
-    "agentdesk": "./dist/cli.js"
+    "agentdesk": "dist/cli.js"
   },
   "files": [
     "dist",
