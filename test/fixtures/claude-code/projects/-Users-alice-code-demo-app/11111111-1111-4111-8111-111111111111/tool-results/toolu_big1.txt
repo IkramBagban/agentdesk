@@ -1,0 +1,5 @@
+PASS  test/math.test.js
+PASS  test/config.test.js
+FAIL  test/parser.test.js (fixture failure, intentional)
+
+Tests: 2 passed, 1 failed, 3 total
