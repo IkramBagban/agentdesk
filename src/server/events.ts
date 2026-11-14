@@ -136,7 +136,10 @@ export async function readRefs(
 
 export class ExistsCache {
   private m = new Map<string, { v: boolean; at: number }>();
-  constructor(private ttlMs = 5000) {}
+  private ttlMs: number;
+  constructor(ttlMs = 5000) {
+    this.ttlMs = ttlMs;
+  }
   async exists(path: string): Promise<boolean> {
     const hit = this.m.get(path);
     const now = Date.now();

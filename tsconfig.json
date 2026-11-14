@@ -8,8 +8,14 @@
     "allowImportingTsExtensions": true,
     "noEmit": true,
     "skipLibCheck": true,
-    "types": ["node"],
-    "verbatimModuleSyntax": true
+    "types": [
+      "node"
+    ],
+    "verbatimModuleSyntax": true,
+    "erasableSyntaxOnly": true
   },
-  "include": ["src", "test"]
+  "include": [
+    "src",
+    "test"
+  ]
 }

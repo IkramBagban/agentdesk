@@ -62,8 +62,10 @@ function readSidecar(file: DiscoveredFile): { toolUseId?: string; description?: 
 export class ClaudeCodeParser implements SessionParser {
   private st: State = freshState();
   private readonly sidecar: { toolUseId?: string; description?: string };
+  private readonly file: DiscoveredFile;
 
-  constructor(private readonly file: DiscoveredFile) {
+  constructor(file: DiscoveredFile) {
+    this.file = file;
     this.sidecar = readSidecar(file);
   }
 

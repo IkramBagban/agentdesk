@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "dev",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["dev"],
+      "env": { "AGENT_HISTORY_DEV_TOKEN": "dev-token" },
+      "port": 5173
+    }
+  ]
+}

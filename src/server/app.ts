@@ -168,6 +168,12 @@ export function createApp(deps: AppDeps): Hono {
     return c.json({ ...meta, subSessions: store.getSubSessions(id) });
   });
 
+  app.get('/api/sessions/:id/outline', (c) => {
+    const id = c.req.param('id');
+    if (!store.getSession(id)) return fail(c, 404, 'session not found');
+    return c.json(store.outline(id));
+  });
+
   // ---- events --------------------------------------------------------------
 
   app.get('/api/sessions/:id/events', async (c) => {

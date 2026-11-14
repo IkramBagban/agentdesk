@@ -62,6 +62,7 @@ function makeStore(meta: SessionMeta): IndexStore {
     },
     getEventRef: (_id, seq) => refs.find((r) => r.seq === seq),
     toolLinks: () => new Map([['tu1', 'fake:sub1']]),
+    outline: () => [{ seq: 0, preview: 'hello', offBranch: false }],
     search: () => ({
       items: [{ sessionId: meta.id, seq: 0, projectKey: 'p', role: 'user', snippet: 'a <mark>hit</mark> &amp; more' }],
     }),
