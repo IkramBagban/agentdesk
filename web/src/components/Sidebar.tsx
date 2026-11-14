@@ -178,6 +178,8 @@ function SearchResults({ q: text }: { q: string }) {
   const route = useRoute();
   const q = useInfiniteList(['search', text, route.source, route.project], (cursor) => api.search({ q: text, source: route.source, project: route.project, cursor }));
   const items = useMemo(() => q.data?.pages.flatMap((p) => p.items) ?? [], [q.data]);
+  const projects = useQuery({ queryKey: ['projects', route.source], queryFn: () => api.projects(route.source) });
+  const names = useMemo(() => new Map(projects.data?.map((p) => [p.key, p.displayName || projectName(p.path, p.key)]) ?? []), [projects.data]);
   if (q.isLoading) return <p className="p-4 text-muted">Searching…</p>;
   if (q.isError) return <p className="p-4 text-error">{(q.error as Error).message}</p>;
   if (!items.length) return <p className="p-4 text-muted">No matches for “{text}”. Try fewer or different words.</p>;
@@ -200,8 +202,8 @@ function SearchResults({ q: text }: { q: string }) {
           {/* Server escapes everything except <mark>. */}
           <p className="mt-1 line-clamp-3 font-serif text-[13.5px] leading-snug" dangerouslySetInnerHTML={{ __html: h.snippet }} />
           <div className="mt-1 flex items-center gap-1 text-[11.5px] text-faint">
-            {h.role === 'user' ? 'You' : h.role === 'assistant' ? <><Bot size={11} /> Assistant</> : h.role}
-            <span>· {projectName(undefined, h.projectKey)}</span>
+            {h.role === 'user' ? 'You' : h.role === 'assistant' ? <><Bot size={11} /> Assistant</> : h.role === 'tool' ? 'Tool output' : 'Background'}
+            <span className="truncate">· {names.get(h.projectKey) ?? projectName(h.projectPath, h.projectKey)}</span>
           </div>
         </button>
       )}

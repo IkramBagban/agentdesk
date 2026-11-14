@@ -76,3 +76,11 @@ export function toolSummary(name: string, input: unknown): string {
   const first = Object.entries(o).find(([, v]) => typeof v === 'string' || typeof v === 'number');
   return first ? `${first[0]}: ${String(first[1]).slice(0, 160)}` : name;
 }
+
+/** "mcp__<server>__<tool>" → { name: tool, server }; servers that are bare UUIDs are dropped. */
+export function toolName(raw: string): { name: string; server?: string } {
+  const m = /^mcp__(.+?)__(.+)$/.exec(raw);
+  if (!m) return { name: raw };
+  const server = m[1]!;
+  return { name: m[2]!, server: /^[0-9a-f]{8}-[0-9a-f-]{27,}$/i.test(server) ? undefined : server.replace(/^plugin_/, '') };
+}

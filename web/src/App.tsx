@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Moon, Sun } from 'lucide-react';
-import { api } from './api.ts';
+import { api, ApiError } from './api.ts';
 import { useRoute } from './router.ts';
 import { Sidebar } from './components/Sidebar.tsx';
 import { SessionHeader } from './components/SessionHeader.tsx';
@@ -75,6 +75,8 @@ export function App() {
 
   useEffect(() => setDrawer(false), [route.sessionId]);
 
+  if (status.error instanceof ApiError && status.error.status === 401) return <Locked />;
+
   return (
     <div className="flex h-full">
       <div className={`fixed inset-y-0 left-0 z-30 w-[22rem] max-w-[88vw] max-lg:transition-transform lg:static lg:translate-x-0 ${drawer ? 'translate-x-0 shadow-2xl' : '-translate-x-full'}`}>
@@ -124,6 +126,20 @@ function Welcome({ onMenu, sessionCount }: { onMenu: () => void; sessionCount?: 
         <button type="button" onClick={onMenu} className="mt-5 rounded-md bg-ink px-3 py-1.5 text-paper lg:hidden">
           Show chats
         </button>
+      </div>
+    </div>
+  );
+}
+
+function Locked() {
+  return (
+    <div className="flex h-full items-center justify-center p-8">
+      <div className="max-w-md">
+        <h1 className="font-serif text-[24px] leading-tight font-medium">Open the link from your terminal</h1>
+        <p className="mt-3 text-[15px] leading-relaxed text-muted">
+          This page needs the private link that <code className="font-mono text-[13px]">agent-history</code> printed when it started. It keeps other websites and apps from reading your chats.
+        </p>
+        <p className="mt-3 text-[13px] text-faint">If you closed the terminal, run the command again to get a new link.</p>
       </div>
     </div>
   );

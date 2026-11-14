@@ -4,7 +4,7 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import { ArrowDownToLine, ArrowUpToLine, ClipboardPaste, GitBranch, Images, Wrench } from 'lucide-react';
 import { api, type ChatEvent, type View } from '../api.ts';
 import { navigate } from '../router.ts';
-import { bytes, fullDate, time } from '../format.ts';
+import { bytes, fullDate, time, toolName } from '../format.ts';
 import { activitySummary, buildRows, type Row } from './rows.ts';
 import { BlockView, Disclosure, type BlockCtx } from './Blocks.tsx';
 import { Markdown } from './Markdown.tsx';
@@ -47,15 +47,28 @@ export function Conversation({ sessionId, view, seq, onScrollToPrompt }: { sessi
     getItemKey: (i) => rows[i]!.key,
   });
 
-  // Keep the reader's place when older rows are prepended.
-  const firstKey = useRef<string | undefined>(undefined);
+  // Older rows are fetched only when the reader scrolls near the top, and
+  // the scroll offset is shifted by exactly the height they add, so the
+  // text under the reader's eyes doesn't move.
+  const pendingPrepend = useRef<{ top: number; total: number; firstKey?: string } | undefined>(undefined);
+  const firstKey = rows[0]?.key;
   useLayoutEffect(() => {
-    const prev = firstKey.current;
-    firstKey.current = rows[0]?.key;
-    if (!prev || prev === rows[0]?.key) return;
-    const idx = rows.findIndex((r) => r.key === prev);
-    if (idx > 0) v.scrollToIndex(idx, { align: 'start' });
-  }, [rows, v]);
+    const p = pendingPrepend.current;
+    const el = scrollRef.current;
+    if (!p || !el || p.firstKey === firstKey) return;
+    pendingPrepend.current = undefined;
+    el.scrollTop = p.top + (v.getTotalSize() - p.total);
+  }, [firstKey, v]);
+
+  const onScroll = () => {
+    const el = scrollRef.current;
+    if (!el || el.scrollTop > 600 || !q.hasPreviousPage || q.isFetchingPreviousPage || pendingPrepend.current) return;
+    pendingPrepend.current = { top: el.scrollTop, total: v.getTotalSize(), firstKey };
+    void q.fetchPreviousPage().then((r) => {
+      // Nothing was added (e.g. error): allow another attempt.
+      if (r.data?.pages[0]?.items.length === 0 || r.isError) pendingPrepend.current = undefined;
+    });
+  };
 
   // Jump target: scroll to the row containing `seq` once loaded.
   const jumped = useRef<string>('');
@@ -68,14 +81,11 @@ export function Conversation({ sessionId, view, seq, onScrollToPrompt }: { sessi
     }
   }, [rows, seq, sessionId, v]);
 
-  // Load more at either edge.
+  // Newer rows: fetch when the end comes into view.
   const items = v.getVirtualItems();
   useEffect(() => {
-    const first = items[0];
     const last = items.at(-1);
-    if (!first || !last) return;
-    if (last.index >= rows.length - 3 && q.hasNextPage && !q.isFetchingNextPage) void q.fetchNextPage();
-    if (first.index <= 2 && q.hasPreviousPage && !q.isFetchingPreviousPage) void q.fetchPreviousPage();
+    if (last && last.index >= rows.length - 3 && q.hasNextPage && !q.isFetchingNextPage) void q.fetchNextPage();
   }, [items, rows.length, q]);
 
   // Let the outline spine scroll us.
@@ -109,7 +119,7 @@ export function Conversation({ sessionId, view, seq, onScrollToPrompt }: { sessi
   const ctxBase = { sessionId, onOpenSubSession: (id: string) => navigate({ sessionId: id, seq: undefined }) };
 
   return (
-    <div ref={scrollRef} className="scrollbar-thin relative h-full overflow-y-auto" data-testid="conversation">
+    <div ref={scrollRef} onScroll={onScroll} className="scrollbar-thin relative h-full overflow-y-auto [overflow-anchor:none]" data-testid="conversation">
       <div style={{ height: v.getTotalSize(), position: 'relative' }}>
         {items.map((it) => {
           const row = rows[it.index]!;
@@ -186,7 +196,7 @@ const RowView = memo(function RowView({ row, ctxBase, highlight, showInjected }:
         </div>
       );
     case 'activity':
-      return <Activity row={row} ctxBase={ctxBase} className={hl} />;
+      return <Activity row={row} ctxBase={ctxBase} className={hl} defaultOpen={highlight} />;
   }
 });
 
@@ -269,13 +279,13 @@ function OffBranch() {
   );
 }
 
-function Activity({ row, ctxBase, className }: { row: Extract<Row, { kind: 'activity' }>; ctxBase: Omit<BlockCtx, 'seq'>; className: string }) {
-  const [open, setOpen] = useState(false);
+function Activity({ row, ctxBase, className, defaultOpen }: { row: Extract<Row, { kind: 'activity' }>; ctxBase: Omit<BlockCtx, 'seq'>; className: string; defaultOpen: boolean }) {
+  const [open, setOpen] = useState(defaultOpen);
   const s = useMemo(() => activitySummary(row.events), [row.events]);
   const toolCount = [...s.tools.values()].reduce((a, b) => a + b, 0);
   const parts: string[] = [];
   if (toolCount) {
-    const names = [...s.tools.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([n, c]) => (c > 1 ? `${n} ×${c}` : n));
+    const names = [...s.tools.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([n, c]) => (c > 1 ? `${toolName(n).name} ×${c}` : toolName(n).name));
     parts.push(`${toolCount} tool ${toolCount === 1 ? 'call' : 'calls'}: ${names.join(', ')}${s.tools.size > 3 ? ', …' : ''}`);
   }
   if (s.thinking) parts.push('thinking');

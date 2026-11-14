@@ -26,6 +26,7 @@ export interface SearchHit {
   seq: number;
   sessionTitle?: string;
   projectKey: string;
+  projectPath?: string;
   timestamp?: string;
   role: ChatEvent['role'];
   snippet: string;

@@ -2,7 +2,7 @@ import { useState, type ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { AlertTriangle, ChevronRight, FileText, Info, Brain, Bot, ImageOff, Maximize2, Braces } from 'lucide-react';
 import { api, type Block, type ImageBlock, type ToolResultBlock, type ToolUseBlock } from '../api.ts';
-import { bytes, toolSummary } from '../format.ts';
+import { bytes, toolName, toolSummary } from '../format.ts';
 import { CodeBlock, Markdown } from './Markdown.tsx';
 import { useLightbox } from './Lightbox.tsx';
 
@@ -174,7 +174,8 @@ export function ToolUseView({ block, ctx }: { block: ToolUseBlock; ctx: BlockCtx
       tone={result?.isError ? 'error' : 'default'}
       summary={
         <>
-          <span className="font-medium text-ink">{block.name}</span>
+          <span className="font-medium text-ink" title={block.name}>{toolName(block.name).name}</span>
+          {toolName(block.name).server && <span className="ml-1.5 text-faint">{toolName(block.name).server}</span>}
           {summary && summary !== block.name && <span className="ml-2 font-mono text-[12px]">{summary}</span>}
           {result?.isError && <span className="ml-2">failed</span>}
         </>
@@ -206,7 +207,8 @@ export function BlockView({ block, ctx }: { block: Block; ctx: BlockCtx }): Reac
     case 'text':
       return <TextView text={block.text} truncated={block.truncated} ctx={ctx} />;
     case 'thinking':
-      if (block.redacted && !block.text) return <div className="flex items-center gap-1.5 px-1 text-[13px] text-faint"><Brain size={14} /> Reasoning (encrypted, not readable)</div>;
+      // Thinking that wasn't saved in readable form (signature-only or encrypted): nothing to show.
+      if (!block.text.trim()) return null;
       return (
         <Disclosure summary={<span className="inline-flex items-center gap-1.5"><Brain size={14} /> Thinking <span className="text-faint">{block.text.split(/\s+/).slice(0, 14).join(' ')}…</span></span>}>
           {() => <TextView text={block.text} truncated={block.truncated} ctx={ctx} />}

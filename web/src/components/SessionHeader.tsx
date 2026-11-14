@@ -21,11 +21,11 @@ export function SessionHeader({ sessionId, view, onMenu }: { sessionId: string; 
 
   return (
     <header className="border-b border-rule bg-paper/95 px-4 py-3 backdrop-blur sm:px-6">
-      <div className="flex items-start gap-3">
+      <div className="flex flex-wrap items-start gap-x-3 gap-y-2">
         <button type="button" onClick={onMenu} aria-label="Show chats" className="mt-0.5 rounded p-1 text-muted hover:bg-sunken lg:hidden">
           <Menu size={18} />
         </button>
-        <div className="min-w-0 flex-1">
+        <div className="min-w-0 flex-1 basis-[calc(100%-3rem)] sm:basis-0">
           {s?.parentSessionId && (
             <button type="button" onClick={() => navigate({ sessionId: s.parentSessionId, seq: undefined })} className="mb-1 inline-flex items-center gap-1 text-[12.5px] text-prompt hover:underline">
               <ArrowLeft size={13} /> Back to the main chat
@@ -38,9 +38,9 @@ export function SessionHeader({ sessionId, view, onMenu }: { sessionId: string; 
           <p className="mt-0.5 truncate text-[12.5px] text-muted" title={s?.filePath}>
             {facts.join('  ·  ')}
           </p>
-          {s && (s.gitBranch || s.links.length > 0 || s.subSessions.length > 0) && (
+          {s && ((s.gitBranch && s.gitBranch !== 'HEAD') || s.links.length > 0 || s.subSessions.length > 0) && (
             <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12.5px] text-muted">
-              {s.gitBranch && (
+              {s.gitBranch && s.gitBranch !== 'HEAD' && (
                 <span className="inline-flex items-center gap-1">
                   <GitBranch size={12} /> {s.gitBranch}
                 </span>
@@ -59,7 +59,7 @@ export function SessionHeader({ sessionId, view, onMenu }: { sessionId: string; 
             </div>
           )}
         </div>
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="ml-auto flex shrink-0 items-center gap-2">
           <div role="radiogroup" aria-label="What to show" className="flex rounded-md border border-rule bg-surface p-0.5 text-[12.5px]">
             {(['conversation', 'all'] as const).map((v) => (
               <button
