@@ -4,7 +4,7 @@ import tailwindcss from '@tailwindcss/vite';
 import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('.', import.meta.url));
-const devToken = process.env.AGENT_HISTORY_DEV_TOKEN ?? 'dev-token';
+const devToken = process.env.AGENTDESK_DEV_TOKEN ?? process.env.AGENT_HISTORY_DEV_TOKEN ?? 'dev-token';
 
 export default defineConfig({
   root,

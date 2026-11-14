@@ -47,6 +47,17 @@ export function tokens(n?: number): string {
   return `${(n / 1_000_000).toFixed(1)}M`;
 }
 
+/** Chats run in throwaway scratch folders (e.g. Claude desktop's quick chats). */
+export function isScratch(s: { projectPath?: string; projectKey: string }): boolean {
+  const p = s.projectPath ?? s.projectKey;
+  return /scratch-workspaces|[\\/]scratch-\d{4}-\d{2}-\d{2}/.test(p) || /-scratch-\d{4}-\d{2}-\d{2}-/.test(s.projectKey);
+}
+
+/** Display name of a session's project, with scratch folders named as such. */
+export function projectLabel(s: { projectPath?: string; projectKey: string }): string {
+  return isScratch(s) ? 'Scratch chat' : projectName(s.projectPath, s.projectKey);
+}
+
 /** "-Users-alice-code-demo-app" / "/Users/alice/code/demo-app" → "demo-app" */
 export function projectName(path?: string, key?: string): string {
   const p = path ?? key?.replace(/^[^:]+:/, '') ?? '';
@@ -83,4 +94,57 @@ export function toolName(raw: string): { name: string; server?: string } {
   if (!m) return { name: raw };
   const server = m[1]!;
   return { name: m[2]!, server: /^[0-9a-f]{8}-[0-9a-f-]{27,}$/i.test(server) ? undefined : server.replace(/^plugin_/, '') };
+}
+
+const sepDayFmt = new Intl.DateTimeFormat(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
+const sepYearFmt = new Intl.DateTimeFormat(undefined, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+
+/** "Today at 15:20" / "Yesterday at 9:02" / "Sun 25 Oct at 15:20" (year added when not this year). */
+export function separatorDate(iso?: string): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const now = new Date();
+  const y = new Date(now);
+  y.setDate(now.getDate() - 1);
+  const day =
+    d.toDateString() === now.toDateString()
+      ? 'Today'
+      : d.toDateString() === y.toDateString()
+        ? 'Yesterday'
+        : d.getFullYear() === now.getFullYear()
+          ? sepDayFmt.format(d)
+          : sepYearFmt.format(d);
+  return `${day} at ${timeFmt.format(d)}`;
+}
+
+/** Milliseconds between two ISO timestamps, or undefined. */
+export function span(a?: string, b?: string): number | undefined {
+  if (!a || !b) return undefined;
+  const ms = Date.parse(b) - Date.parse(a);
+  return Number.isFinite(ms) && ms >= 0 ? ms : undefined;
+}
+
+/** 4210 → "4s", 250000 → "4m 10s", 7_500_000 → "2h 5m" */
+export function duration(ms: number): string {
+  const s = Math.round(ms / 1000);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ${s % 60}s`;
+  const h = Math.floor(m / 60);
+  return `${h}h ${m % 60}m`;
+}
+
+export function plural(n: number, one: string, many = `${one}s`): string {
+  return `${n} ${n === 1 ? one : many}`;
+}
+
+/** Last path segment: "/a/b/c.ts" → "c.ts" */
+export function basename(p: string): string {
+  return p.split(/[\\/]/).filter(Boolean).at(-1) ?? p;
+}
+
+/** "/Users/me/x" → "~/x" for display. */
+export function tildify(p: string): string {
+  return p.replace(/^\/(?:Users|home)\/[^/]+/, '~');
 }

@@ -1,32 +1,48 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Moon, Sun } from 'lucide-react';
+import { Layers, Lock, PanelLeft } from 'lucide-react';
 import { api, ApiError } from './api.ts';
 import { useRoute } from './router.ts';
 import { Sidebar } from './components/Sidebar.tsx';
 import { SessionHeader } from './components/SessionHeader.tsx';
 import { Conversation } from './components/Conversation.tsx';
-import { Spine } from './components/Spine.tsx';
+import { IconButton } from './components/ui.tsx';
 
+export type ThemePref = 'system' | 'light' | 'dark';
+
+function readPref<T extends string>(key: string, allowed: readonly T[], fallback: T): T {
+  try {
+    const v = localStorage.getItem(key);
+    if (v && (allowed as readonly string[]).includes(v)) return v as T;
+  } catch {
+    /* storage blocked */
+  }
+  return fallback;
+}
+
+function writePref(key: string, value: string) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Theme follows the OS unless the reader picks one; the OS is tracked live. */
 function useTheme() {
-  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
-    try {
-      const saved = localStorage.getItem('ah-theme');
-      if (saved === 'light' || saved === 'dark') return saved;
-    } catch {
-      /* storage blocked */
-    }
-    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-  });
+  const [pref, setPref] = useState<ThemePref>(() => readPref('agentdesk-theme', ['system', 'light', 'dark'] as const, 'system'));
   useEffect(() => {
-    document.documentElement.dataset.theme = theme;
-    try {
-      localStorage.setItem('ah-theme', theme);
-    } catch {
-      /* ignore */
-    }
-  }, [theme]);
-  return [theme, () => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))] as const;
+    const mq = window.matchMedia('(prefers-color-scheme: dark)');
+    const apply = () => {
+      document.documentElement.dataset.theme = pref === 'system' ? (mq.matches ? 'dark' : 'light') : pref;
+    };
+    apply();
+    writePref('agentdesk-theme', pref);
+    if (pref !== 'system') return;
+    mq.addEventListener('change', apply);
+    return () => mq.removeEventListener('change', apply);
+  }, [pref]);
+  return [pref, setPref] as const;
 }
 
 /** Live updates: index progress and changed sessions arrive over SSE. */
@@ -61,71 +77,126 @@ function useLiveUpdates() {
   }, [qc]);
 }
 
+const DESKTOP = '(min-width: 1024px)';
+const isDesktop = () => window.matchMedia(DESKTOP).matches;
+
+function useIsDesktop() {
+  const [v, setV] = useState(isDesktop);
+  useEffect(() => {
+    const mq = window.matchMedia(DESKTOP);
+    const on = () => setV(mq.matches);
+    mq.addEventListener('change', on);
+    return () => mq.removeEventListener('change', on);
+  }, []);
+  return v;
+}
+
 export function App() {
   const route = useRoute();
-  const [theme, toggleTheme] = useTheme();
+  const [theme, setTheme] = useTheme();
+  // Desktop: sidebar shown/hidden (remembered). Below 1024px: a drawer.
+  const [pinned, setPinned] = useState(() => readPref('agentdesk-sidebar', ['open', 'closed'] as const, 'open') === 'open');
   const [drawer, setDrawer] = useState(false);
+  const desktop = useIsDesktop();
   const status = useQuery({ queryKey: ['status'], queryFn: api.status, refetchInterval: (q) => (q.state.data?.index.state === 'indexing' ? 2000 : false) });
   useLiveUpdates();
 
-  const jumpRef = useRef<(seq: number) => void>(undefined);
-  const registerJump = useCallback((fn: (seq: number) => void) => {
-    jumpRef.current = fn;
+  const toggleSidebar = useCallback(() => {
+    if (isDesktop()) {
+      setPinned((p) => {
+        writePref('agentdesk-sidebar', p ? 'closed' : 'open');
+        return !p;
+      });
+    } else setDrawer((d) => !d);
   }, []);
 
-  useEffect(() => setDrawer(false), [route.sessionId]);
+  useEffect(() => setDrawer(false), [route.sessionId, route.seq]);
+  useEffect(() => {
+    if (!drawer) return;
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setDrawer(false);
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [drawer]);
+
+  // Cmd/Ctrl+\ toggles the sidebar, like desktop chat apps.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === '\\') {
+        e.preventDefault();
+        toggleSidebar();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [toggleSidebar]);
 
   if (status.error instanceof ApiError && status.error.status === 401) return <Locked />;
 
   return (
-    <div className="flex h-full">
-      <div className={`fixed inset-y-0 left-0 z-30 w-[22rem] max-w-[88vw] max-lg:transition-transform lg:static lg:translate-x-0 ${drawer ? 'translate-x-0 shadow-2xl' : '-translate-x-full'}`}>
-        <Sidebar status={status.data} />
+    <div className="flex h-full bg-canvas">
+      <div
+        className={`fixed inset-y-0 left-0 z-40 w-[280px] max-w-[86vw] transition-transform duration-200 ease-out lg:static lg:z-auto lg:shrink-0 lg:transition-[margin] ${
+          drawer ? 'translate-x-0 shadow-pop' : '-translate-x-full'
+        } lg:translate-x-0 lg:shadow-none ${pinned ? '' : 'lg:-ml-[280px]'}`}
+        inert={(desktop ? !pinned : !drawer) ? true : undefined}
+      >
+        <Sidebar status={status.data} theme={theme} onTheme={setTheme} onClose={toggleSidebar} />
       </div>
-      {drawer && <div className="fixed inset-0 z-20 bg-black/30 lg:hidden" onClick={() => setDrawer(false)} />}
+      {drawer && <div className="fixed inset-0 z-30 bg-black/40 backdrop-blur-[1px] lg:hidden" onClick={() => setDrawer(false)} aria-hidden />}
 
       <main className="flex min-w-0 flex-1 flex-col">
         {route.sessionId ? (
           <>
-            <SessionHeader sessionId={route.sessionId} view={route.view} onMenu={() => setDrawer(true)} />
-            <div className="flex min-h-0 flex-1">
-              <div className="min-w-0 flex-1">
-                <Conversation key={route.sessionId} sessionId={route.sessionId} view={route.view} seq={route.seq} onScrollToPrompt={registerJump} />
-              </div>
-              <Spine sessionId={route.sessionId} current={route.seq} onJump={(seq) => jumpRef.current?.(seq)} />
+            <SessionHeader sessionId={route.sessionId} view={route.view} onToggleSidebar={toggleSidebar} sidebarShown={pinned} />
+            <div className="relative min-h-0 flex-1">
+              <Conversation
+                key={`${route.sessionId}:${route.view}`}
+                sessionId={route.sessionId}
+                view={route.view}
+                seq={route.seq}
+              />
             </div>
           </>
         ) : (
-          <Welcome onMenu={() => setDrawer(true)} sessionCount={status.data?.index.sessionCount} />
+          <Welcome onToggleSidebar={toggleSidebar} sidebarShown={pinned} sessionCount={status.data?.index.sessionCount} />
         )}
       </main>
-
-      <button
-        type="button"
-        onClick={toggleTheme}
-        aria-label={theme === 'dark' ? 'Use light theme' : 'Use dark theme'}
-        className="fixed right-3 bottom-3 z-10 rounded-full border border-rule bg-surface p-2 text-muted shadow-sm hover:text-ink"
-      >
-        {theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
-      </button>
     </div>
   );
 }
 
-function Welcome({ onMenu, sessionCount }: { onMenu: () => void; sessionCount?: number }) {
+function Welcome({ onToggleSidebar, sidebarShown, sessionCount }: { onToggleSidebar: () => void; sidebarShown: boolean; sessionCount?: number }) {
   return (
-    <div className="flex h-full items-center justify-center p-8">
-      <div className="max-w-md">
-        <h1 className="font-serif text-[28px] leading-tight font-medium">Your agent history</h1>
-        <p className="mt-3 text-[15px] leading-relaxed text-muted">
-          {sessionCount ? `${sessionCount.toLocaleString()} chats` : 'Your chats'} from this computer, read straight from the files your coding agents keep. Pick a chat on the left, or press <kbd className="rounded border border-rule bg-surface px-1.5 font-mono text-[12px]">/</kbd> to search every message.
-        </p>
-        <p className="mt-3 text-[13px] text-faint">
-          Inside a chat, <kbd className="rounded border border-rule bg-surface px-1 font-mono text-[11px]">j</kbd> and <kbd className="rounded border border-rule bg-surface px-1 font-mono text-[11px]">k</kbd> move between your prompts.
-        </p>
-        <button type="button" onClick={onMenu} className="mt-5 rounded-md bg-ink px-3 py-1.5 text-paper lg:hidden">
-          Show chats
-        </button>
+    <div className="flex h-full flex-col">
+      <div className={`flex h-[52px] shrink-0 items-center px-3 ${sidebarShown ? 'lg:hidden' : ''}`}>
+        <IconButton label="Show sidebar" onClick={onToggleSidebar}>
+          <PanelLeft size={18} />
+        </IconButton>
+      </div>
+      <div className="flex flex-1 items-center justify-center px-6 pb-16">
+        <div className="max-w-[420px] text-center">
+          <div className="mx-auto mb-5 flex size-12 items-center justify-center rounded-2xl bg-ink text-canvas">
+            <Layers size={22} strokeWidth={2} />
+          </div>
+          <h1 className="text-[22px] font-semibold tracking-[-0.01em]">Welcome to agentdesk</h1>
+          <p className="mt-2 text-[14.5px] leading-relaxed text-muted">
+            One place for your coding agents. {sessionCount ? `${sessionCount.toLocaleString()} chats` : 'Your chats'} from Claude Code and Codex, read straight from the files on this computer. Nothing leaves it.
+          </p>
+          <div className="mt-6 inline-flex flex-wrap justify-center gap-x-5 gap-y-2 text-[12.5px] text-faint">
+            <span>
+              <kbd>/</kbd> search
+            </span>
+            <span>
+              <kbd>j</kbd> <kbd>k</kbd> next / previous prompt
+            </span>
+            <span>
+              <kbd>⌘</kbd> <kbd>\</kbd> sidebar
+            </span>
+          </div>
+          <button type="button" onClick={onToggleSidebar} className="mt-7 rounded-full bg-ink px-4 py-2 text-[13.5px] font-medium text-canvas lg:hidden">
+            Browse chats
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -133,13 +204,16 @@ function Welcome({ onMenu, sessionCount }: { onMenu: () => void; sessionCount?: 
 
 function Locked() {
   return (
-    <div className="flex h-full items-center justify-center p-8">
-      <div className="max-w-md">
-        <h1 className="font-serif text-[24px] leading-tight font-medium">Open the link from your terminal</h1>
-        <p className="mt-3 text-[15px] leading-relaxed text-muted">
-          This page needs the private link that <code className="font-mono text-[13px]">agent-history</code> printed when it started. It keeps other websites and apps from reading your chats.
+    <div className="flex h-full items-center justify-center px-6">
+      <div className="max-w-[420px] text-center">
+        <div className="mx-auto mb-5 flex size-12 items-center justify-center rounded-2xl bg-raised text-muted">
+          <Lock size={20} strokeWidth={1.75} />
+        </div>
+        <h1 className="text-[20px] font-semibold tracking-[-0.01em]">Open the link from your terminal</h1>
+        <p className="mt-2 text-[14.5px] leading-relaxed text-muted">
+          This page needs the private link that <code className="rounded bg-raised px-1 py-0.5 font-mono text-[12.5px]">agentdesk</code> printed when it started. It keeps other websites and apps from reading your chats.
         </p>
-        <p className="mt-3 text-[13px] text-faint">If you closed the terminal, run the command again to get a new link.</p>
+        <p className="mt-3 text-[13px] text-faint">Closed the terminal? Run the command again for a new link.</p>
       </div>
     </div>
   );

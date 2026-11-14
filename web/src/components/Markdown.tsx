@@ -1,4 +1,5 @@
 import { memo, useEffect, useState, type ReactNode } from 'react';
+import { CopyButton } from './ui.tsx';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -51,7 +52,8 @@ function loadHighlighter(): Promise<Highlighter> {
 const ALIASES: Record<string, string> = { sh: 'bash', zsh: 'bash', console: 'bash', py: 'python', yml: 'yaml', md: 'markdown', typescript: 'ts', javascript: 'js', rs: 'rust' };
 const MAX_HIGHLIGHT = 40_000;
 
-export const CodeBlock = memo(function CodeBlock({ code, lang }: { code: string; lang?: string }) {
+/** Highlighted code. `bare` drops the frame/header (for use inside other panels). */
+export const CodeBlock = memo(function CodeBlock({ code, lang, bare = false, className = '' }: { code: string; lang?: string; bare?: boolean; className?: string }) {
   const [html, setHtml] = useState<string>();
   const l = lang ? (ALIASES[lang] ?? lang) : undefined;
   useEffect(() => {
@@ -67,11 +69,22 @@ export const CodeBlock = memo(function CodeBlock({ code, lang }: { code: string;
       alive = false;
     };
   }, [code, l]);
-  if (html) return <div className="code-block" dangerouslySetInnerHTML={{ __html: html }} />;
-  return (
-    <pre className="code-block">
+  const body = html ? (
+    <div className={bare ? className : 'overflow-x-auto px-3.5 pt-1 pb-3'} dangerouslySetInnerHTML={{ __html: html }} />
+  ) : (
+    <pre className={bare ? className : 'overflow-x-auto px-3.5 pt-1 pb-3'}>
       <code>{code}</code>
     </pre>
+  );
+  if (bare) return body;
+  return (
+    <div className={`code-block group/code relative !p-0 ${className}`}>
+      <div className="flex h-8 items-center justify-between pr-1.5 pl-3.5 font-sans text-[11.5px] text-faint">
+        <span>{lang ?? 'text'}</span>
+        <CopyButton text={code} label="Copy code" size={14} className="opacity-60 group-hover/code:opacity-100 focus-visible:opacity-100" />
+      </div>
+      {body}
+    </div>
   );
 });
 
