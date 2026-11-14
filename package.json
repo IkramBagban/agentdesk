@@ -1,0 +1,53 @@
+{
+  "name": "agent-history",
+  "version": "0.1.0",
+  "description": "Browse your local coding-agent chat history (Claude Code, Codex) in a fast local UI.",
+  "type": "module",
+  "license": "MIT",
+  "bin": {
+    "agent-history": "./dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "dev": "concurrently -n server,web \"pnpm dev:server\" \"pnpm dev:web\"",
+    "dev:server": "tsx watch src/cli.ts --no-open --port 4782 --dev",
+    "dev:web": "vite --config web/vite.config.ts",
+    "build": "pnpm build:web && pnpm build:server",
+    "build:web": "vite build --config web/vite.config.ts",
+    "build:server": "esbuild src/cli.ts src/index/worker.ts --bundle --platform=node --format=esm --target=node22 --outdir=dist --packages=external",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p web/tsconfig.json"
+  },
+  "dependencies": {
+    "@hono/node-server": "^2.1.8",
+    "hono": "^4.13.18",
+    "open": "^11.0.4"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.5",
+    "@tanstack/react-query": "^5.107.1",
+    "@tanstack/react-virtual": "^3.14.26",
+    "@types/node": "^26.6.6",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.3.0",
+    "concurrently": "^10.0.7",
+    "esbuild": "^0.28.2",
+    "lucide-react": "^1.72.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
+    "shiki": "^4.6.0",
+    "tailwindcss": "^4.3.5",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.8",
+    "vitest": "^5.1.0"
+  }
+}
