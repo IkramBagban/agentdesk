@@ -107,13 +107,34 @@ export function Conversation({ sessionId, view, seq }: { sessionId: string; view
     }
   }, [rows, seq, sessionId, v]);
 
+  // Pin to the bottom until it holds: measured rows replace estimates over a few frames.
+  const pinBottom = useCallback(() => {
+    const until = performance.now() + 2000;
+    let stable = 0;
+    const step = () => {
+      const el = scrollRef.current;
+      if (el) {
+        const target = el.scrollHeight - el.clientHeight;
+        if (Math.abs(el.scrollTop - target) < 2) stable++;
+        else {
+          stable = 0;
+          el.scrollTop = target;
+        }
+      }
+      // Timers, not animation frames, so this also settles in a background tab.
+      if (stable < 8 && performance.now() < until) setTimeout(step, 16);
+    };
+    setTimeout(step, 0);
+  }, []);
+
   // After "jump to end" loads the last page, land at the bottom.
   const landedEnd = useRef(false);
+  const endLoaded = anchor.from === END && !q.isFetching && q.data?.pageParams[0] != null && (q.data.pageParams[0] as Param).from === END;
   useEffect(() => {
-    if (anchor.from !== END || landedEnd.current || !rows.length) return;
+    if (!endLoaded || landedEnd.current || !rows.length) return;
     landedEnd.current = true;
-    requestAnimationFrame(() => v.scrollToIndex(rows.length - 1, { align: 'end' }));
-  }, [anchor.from, rows.length, v]);
+    pinBottom();
+  }, [endLoaded, rows.length, pinBottom]);
 
   // Newer rows: fetch when the end comes into view.
   const items = v.getVirtualItems();
@@ -136,7 +157,7 @@ export function Conversation({ sessionId, view, seq }: { sessionId: string; view
       landedEnd.current = false;
       navigate({ seq: undefined }, { replace: true });
       setAnchor({ from: END, dir: 'backward' });
-    } else v.scrollToIndex(rows.length - 1, { align: 'end' });
+    } else pinBottom();
   };
 
   // j / k move between prompts.
