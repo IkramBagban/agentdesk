@@ -1,5 +1,5 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { useInfiniteQuery } from '@tanstack/react-query';
+import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { ArrowDownToLine, ArrowUpToLine, ClipboardPaste, GitBranch, Images, Wrench } from 'lucide-react';
 import { api, type ChatEvent, type View } from '../api.ts';
@@ -37,6 +37,9 @@ export function Conversation({ sessionId, view, seq, onScrollToPrompt }: { sessi
   }, [q.data]);
   const rows = useMemo(() => buildRows(events), [events]);
   const total = q.data?.pages[0]?.total;
+
+  const meta = useQuery({ queryKey: ['session', sessionId], queryFn: () => api.session(sessionId) });
+  const promptAuthor = meta.data?.parentSessionId ? 'Main agent' : 'You';
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const v = useVirtualizer({
@@ -126,7 +129,7 @@ export function Conversation({ sessionId, view, seq, onScrollToPrompt }: { sessi
           return (
             <div key={it.key} data-index={it.index} ref={v.measureElement} className="absolute top-0 left-0 w-full" style={{ transform: `translateY(${it.start}px)` }}>
               <div className="mx-auto max-w-[46rem] px-5 sm:px-8">
-                <RowView row={row} ctxBase={ctxBase} showInjected={view === 'all'} highlight={seq != null && rowSeqs(row).includes(seq)} />
+                <RowView row={row} ctxBase={ctxBase} author={promptAuthor} showInjected={view === 'all'} highlight={seq != null && rowSeqs(row).includes(seq)} />
               </div>
             </div>
           );
@@ -169,11 +172,11 @@ function Empty({ title, body }: { title: string; body?: string }) {
 
 /* ------------------------------------------------------------------ */
 
-const RowView = memo(function RowView({ row, ctxBase, highlight, showInjected }: { row: Row; ctxBase: Omit<BlockCtx, 'seq'>; highlight: boolean; showInjected: boolean }) {
+const RowView = memo(function RowView({ row, ctxBase, highlight, showInjected, author }: { row: Row; ctxBase: Omit<BlockCtx, 'seq'>; highlight: boolean; showInjected: boolean; author: string }) {
   const hl = highlight ? 'rounded-lg ring-2 ring-mark ring-offset-4 ring-offset-paper' : '';
   switch (row.kind) {
     case 'prompt':
-      return <Prompt event={row.event} ctx={{ ...ctxBase, seq: row.event.seq }} className={hl} showInjected={showInjected} />;
+      return <Prompt event={row.event} ctx={{ ...ctxBase, seq: row.event.seq }} className={hl} showInjected={showInjected} author={author} />;
     case 'reply':
       return (
         <div className={`pt-3 pb-4 ${row.event.offBranch ? 'opacity-55' : ''} ${hl}`}>
@@ -237,13 +240,13 @@ function PastedText({ text, truncated }: { text: string; truncated?: { fullLengt
   );
 }
 
-function Prompt({ event, ctx, className, showInjected }: { event: ChatEvent; ctx: BlockCtx; className: string; showInjected: boolean }) {
+function Prompt({ event, ctx, className, showInjected, author }: { event: ChatEvent; ctx: BlockCtx; className: string; showInjected: boolean; author: string }) {
   return (
     <div id={`seq-${event.seq}`} className={`pt-8 pb-3 ${event.offBranch ? 'opacity-55' : ''} ${className}`}>
       {event.offBranch && <OffBranch />}
       <div className="relative border-l-[3px] border-prompt pl-4">
         <div className="mb-1 text-[12px] text-faint" title={fullDate(event.timestamp)}>
-          You · {time(event.timestamp)}
+          {author} · {time(event.timestamp)}
         </div>
         <div className="space-y-2 text-prompt [&_.prose-msg]:font-sans [&_.prose-msg]:text-[16px] [&_.prose-msg]:leading-relaxed [&_.prose-msg]:font-[520]">
           {event.blocks.map((b, i) => {

@@ -161,7 +161,7 @@ function SessionItem({ s, active, showProject }: { s: SessionMeta; active: boole
       </div>
       <div className="mt-0.5 flex items-center gap-2 text-[12px] text-faint">
         {showProject && <span className="truncate">{projectName(s.projectPath, s.projectKey)}</span>}
-        <span className="shrink-0">{s.messageCount} msgs</span>
+        <span className="shrink-0">{s.messageCount} {s.messageCount === 1 ? 'msg' : 'msgs'}</span>
         {s.imageCount > 0 && (
           <span className="inline-flex shrink-0 items-center gap-0.5">
             <Images size={11} /> {s.imageCount}

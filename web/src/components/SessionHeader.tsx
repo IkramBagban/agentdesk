@@ -12,7 +12,7 @@ export function SessionHeader({ sessionId, view, onMenu }: { sessionId: string; 
         sourceLabel(s.sourceId),
         projectName(s.projectPath, s.projectKey),
         fullDate(s.startedAt),
-        `${s.messageCount} messages`,
+        `${s.messageCount} ${s.messageCount === 1 ? 'message' : 'messages'}`,
         s.costUSD ? usd(s.costUSD) : undefined,
         s.inputTokens || s.outputTokens ? `${tokens(s.inputTokens)} in / ${tokens(s.outputTokens)} out` : undefined,
         s.models.length ? s.models.join(', ') : undefined,
