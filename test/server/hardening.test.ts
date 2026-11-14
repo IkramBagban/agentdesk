@@ -103,7 +103,8 @@ describe('auth', () => {
     const cache = mkdtempSync(join(tmpdir(), 'ah-tok-'));
     const t1 = loadOrCreateToken(cache);
     expect(t1).toMatch(/^[\w-]{43}$/);
-    expect(statSync(join(cache, 'token')).mode & 0o777).toBe(0o600);
+    // Windows has no POSIX permission bits; the file is still per-user under %LOCALAPPDATA%.
+    if (process.platform !== 'win32') expect(statSync(join(cache, 'token')).mode & 0o777).toBe(0o600);
     expect(loadOrCreateToken(cache)).toBe(t1);
     const t2 = loadOrCreateToken(cache, true);
     expect(t2).not.toBe(t1);

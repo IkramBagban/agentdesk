@@ -222,7 +222,7 @@ describe('projects', () => {
     await run();
     const store = new SqliteIndexStore(db);
     const projects = store.listProjects({});
-    const demo = projects.filter((p) => p.path === '/Users/alice/code/demo-app');
+    const demo = projects.filter((p) => p.displayName === 'demo-app');
     expect(demo).toHaveLength(1);
     expect(demo[0]!.sessionCount).toBe(2);
     expect(demo[0]!.displayName).toBe('demo-app');
@@ -264,4 +264,11 @@ describe('worker supervisor', () => {
       await ix.stop();
     }
   }, 30000);
+});
+
+describe('projectKeyFor', () => {
+  it('treats Windows drive letters case-insensitively', async () => {
+    const { projectKeyFor } = await import('../../src/index/project.ts');
+    expect(projectKeyFor('c:\\code\\app', 'x')).toBe(projectKeyFor('C:\\code\\app', 'x'));
+  });
 });

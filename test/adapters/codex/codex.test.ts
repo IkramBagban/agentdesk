@@ -206,7 +206,7 @@ describe('codex adapter', () => {
     const old = process.env.CODEX_HOME;
     process.env.CODEX_HOME = '/x/codexhome';
     try {
-      expect(codexAdapter.defaultRoots()).toEqual(['/x/codexhome/sessions', '/x/codexhome/archived_sessions']);
+      expect(codexAdapter.defaultRoots()).toEqual([join('/x/codexhome', 'sessions'), join('/x/codexhome', 'archived_sessions')]);
     } finally {
       if (old === undefined) delete process.env.CODEX_HOME;
       else process.env.CODEX_HOME = old;

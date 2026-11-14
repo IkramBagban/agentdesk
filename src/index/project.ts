@@ -11,6 +11,7 @@ export const NO_FOLDER_KEY = 'nofolder:';
 export function projectKeyFor(projectPath: string | undefined, fallback: string): string {
   if (!projectPath) return fallback;
   if (/[\\/]Claude[\\/]scratch-workspaces[\\/]/.test(projectPath)) return NO_FOLDER_KEY;
-  const p = normalize(projectPath);
+  // Windows paths are case-insensitive: treat c:\ and C:\ as the same drive.
+  const p = normalize(projectPath).replace(/^([a-z]):/, (_, d: string) => `${d.toUpperCase()}:`);
   return `path:${p.length > 1 ? p.replace(/[\\/]+$/, '') : p}`;
 }

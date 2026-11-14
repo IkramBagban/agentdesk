@@ -85,7 +85,7 @@ describe('discover', () => {
   it('honours CLAUDE_CONFIG_DIR', () => {
     const old = process.env.CLAUDE_CONFIG_DIR;
     process.env.CLAUDE_CONFIG_DIR = '/x/y';
-    expect(adapter.defaultRoots()).toEqual(['/x/y/projects']);
+    expect(adapter.defaultRoots()).toEqual([join('/x/y', 'projects')]);
     if (old === undefined) delete process.env.CLAUDE_CONFIG_DIR;
     else process.env.CLAUDE_CONFIG_DIR = old;
   });

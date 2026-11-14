@@ -351,7 +351,7 @@ describe('misc', () => {
 
   it('cacheDir honours AGENTDESK_CACHE and platform defaults', () => {
     expect(cacheDir({ AGENTDESK_CACHE: '/c' }, 'linux')).toBe('/c');
-    expect(cacheDir({ XDG_CACHE_HOME: '/xdg' }, 'linux')).toBe('/xdg/agentdesk');
+    expect(cacheDir({ XDG_CACHE_HOME: '/xdg' }, 'linux')).toBe(join('/xdg', 'agentdesk'));
     expect(cacheDir({ LOCALAPPDATA: 'C:\\L' }, 'win32')).toContain('agentdesk');
     expect(cacheDir({}, 'darwin')).toContain('Library');
   });
