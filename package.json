@@ -2,13 +2,25 @@
   "name": "agent-history",
   "version": "0.1.0",
   "description": "Browse your local coding-agent chat history (Claude Code, Codex) in a fast local UI.",
-  "type": "module",
+  "keywords": [
+    "claude-code",
+    "codex",
+    "chat-history",
+    "transcripts",
+    "viewer",
+    "cli",
+    "local-first"
+  ],
+  "author": "IkramBagban",
   "license": "MIT",
+  "type": "module",
   "bin": {
     "agent-history": "./dist/cli.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "README.md",
+    "LICENSE"
   ],
   "engines": {
     "node": ">=22.13"
