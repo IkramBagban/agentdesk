@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { History, Lock, PanelLeft } from 'lucide-react';
+import { Layers, Lock, PanelLeft } from 'lucide-react';
 import { api, ApiError } from './api.ts';
 import { useRoute } from './router.ts';
 import { Sidebar } from './components/Sidebar.tsx';
@@ -30,14 +30,14 @@ function writePref(key: string, value: string) {
 
 /** Theme follows the OS unless the reader picks one; the OS is tracked live. */
 function useTheme() {
-  const [pref, setPref] = useState<ThemePref>(() => readPref('ah-theme', ['system', 'light', 'dark'] as const, 'system'));
+  const [pref, setPref] = useState<ThemePref>(() => readPref('agentdesk-theme', ['system', 'light', 'dark'] as const, 'system'));
   useEffect(() => {
     const mq = window.matchMedia('(prefers-color-scheme: dark)');
     const apply = () => {
       document.documentElement.dataset.theme = pref === 'system' ? (mq.matches ? 'dark' : 'light') : pref;
     };
     apply();
-    writePref('ah-theme', pref);
+    writePref('agentdesk-theme', pref);
     if (pref !== 'system') return;
     mq.addEventListener('change', apply);
     return () => mq.removeEventListener('change', apply);
@@ -95,7 +95,7 @@ export function App() {
   const route = useRoute();
   const [theme, setTheme] = useTheme();
   // Desktop: sidebar shown/hidden (remembered). Below 1024px: a drawer.
-  const [pinned, setPinned] = useState(() => readPref('ah-sidebar', ['open', 'closed'] as const, 'open') === 'open');
+  const [pinned, setPinned] = useState(() => readPref('agentdesk-sidebar', ['open', 'closed'] as const, 'open') === 'open');
   const [drawer, setDrawer] = useState(false);
   const desktop = useIsDesktop();
   const status = useQuery({ queryKey: ['status'], queryFn: api.status, refetchInterval: (q) => (q.state.data?.index.state === 'indexing' ? 2000 : false) });
@@ -104,7 +104,7 @@ export function App() {
   const toggleSidebar = useCallback(() => {
     if (isDesktop()) {
       setPinned((p) => {
-        writePref('ah-sidebar', p ? 'closed' : 'open');
+        writePref('agentdesk-sidebar', p ? 'closed' : 'open');
         return !p;
       });
     } else setDrawer((d) => !d);
@@ -175,12 +175,12 @@ function Welcome({ onToggleSidebar, sidebarShown, sessionCount }: { onToggleSide
       </div>
       <div className="flex flex-1 items-center justify-center px-6 pb-16">
         <div className="max-w-[420px] text-center">
-          <div className="mx-auto mb-5 flex size-12 items-center justify-center rounded-2xl bg-raised text-muted">
-            <History size={22} strokeWidth={1.75} />
+          <div className="mx-auto mb-5 flex size-12 items-center justify-center rounded-2xl bg-ink text-canvas">
+            <Layers size={22} strokeWidth={2} />
           </div>
-          <h1 className="text-[22px] font-semibold tracking-[-0.01em]">Your agent history</h1>
+          <h1 className="text-[22px] font-semibold tracking-[-0.01em]">Welcome to agentdesk</h1>
           <p className="mt-2 text-[14.5px] leading-relaxed text-muted">
-            {sessionCount ? `${sessionCount.toLocaleString()} chats` : 'Your chats'} from Claude Code and Codex, read straight from the files on this computer. Nothing leaves it.
+            One place for your coding agents. {sessionCount ? `${sessionCount.toLocaleString()} chats` : 'Your chats'} from Claude Code and Codex, read straight from the files on this computer. Nothing leaves it.
           </p>
           <div className="mt-6 inline-flex flex-wrap justify-center gap-x-5 gap-y-2 text-[12.5px] text-faint">
             <span>
@@ -211,7 +211,7 @@ function Locked() {
         </div>
         <h1 className="text-[20px] font-semibold tracking-[-0.01em]">Open the link from your terminal</h1>
         <p className="mt-2 text-[14.5px] leading-relaxed text-muted">
-          This page needs the private link that <code className="rounded bg-raised px-1 py-0.5 font-mono text-[12.5px]">agent-history</code> printed when it started. It keeps other websites and apps from reading your chats.
+          This page needs the private link that <code className="rounded bg-raised px-1 py-0.5 font-mono text-[12.5px]">agentdesk</code> printed when it started. It keeps other websites and apps from reading your chats.
         </p>
         <p className="mt-3 text-[13px] text-faint">Closed the terminal? Run the command again for a new link.</p>
       </div>

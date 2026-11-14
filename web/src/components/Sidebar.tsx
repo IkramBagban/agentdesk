@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useInfiniteQuery, useQueries, useQuery } from '@tanstack/react-query';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { ChevronRight, Folder, FolderOpen, History, Monitor, Moon, PanelLeftClose, Search, Sun, X } from 'lucide-react';
+import { ChevronRight, Folder, FolderOpen, Layers, Monitor, Moon, PanelLeftClose, Search, Sun, X } from 'lucide-react';
 import { api, type ProjectMeta, type SearchHit, type SessionMeta, type Status } from '../api.ts';
 import { navigate, useRoute } from '../router.ts';
 import { isScratch, projectName, relDate, sourceLabel } from '../format.ts';
@@ -13,7 +13,7 @@ type Mode = 'projects' | 'recent';
 function useMode(): [Mode, (m: Mode) => void] {
   const [mode, setMode] = useState<Mode>(() => {
     try {
-      return localStorage.getItem('ah-sidebar-mode') === 'recent' ? 'recent' : 'projects';
+      return localStorage.getItem('agentdesk-sidebar-mode') === 'recent' ? 'recent' : 'projects';
     } catch {
       return 'projects';
     }
@@ -21,7 +21,7 @@ function useMode(): [Mode, (m: Mode) => void] {
   const set = useCallback((m: Mode) => {
     setMode(m);
     try {
-      localStorage.setItem('ah-sidebar-mode', m);
+      localStorage.setItem('agentdesk-sidebar-mode', m);
     } catch {
       /* ignore */
     }
@@ -69,7 +69,7 @@ export function Sidebar({ status, theme, onTheme, onClose }: { status?: Status; 
       <div className="flex h-[52px] shrink-0 items-center gap-2 pr-2 pl-4">
         <button type="button" onClick={() => navigate({ sessionId: undefined, seq: undefined, q: undefined })} className="flex min-w-0 items-center gap-2 rounded-md text-[14px] font-semibold tracking-[-0.01em]">
           <Logo />
-          Agent History
+          agentdesk
         </button>
         <span className="flex-1" />
         <IconButton label="Hide sidebar (⌘\)" onClick={onClose}>
@@ -110,6 +110,7 @@ export function Sidebar({ status, theme, onTheme, onClose }: { status?: Status; 
 
       {!route.q && (
         <div className="flex items-center gap-1 px-3 pt-1 pb-1" role="tablist" aria-label="Group chats">
+          <span className="mr-auto px-2 text-[11.5px] font-medium tracking-wide text-faint uppercase">Chats</span>
           {(['projects', 'recent'] as const).map((m) => (
             <button
               key={m}
@@ -145,7 +146,7 @@ export function Sidebar({ status, theme, onTheme, onClose }: { status?: Status; 
 function Logo() {
   return (
     <span className="flex size-6 items-center justify-center rounded-[7px] bg-ink text-canvas">
-      <History size={14} strokeWidth={2.25} />
+      <Layers size={14} strokeWidth={2.25} />
     </span>
   );
 }
