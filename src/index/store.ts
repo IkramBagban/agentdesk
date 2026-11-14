@@ -39,6 +39,13 @@ export interface IndexStore {
 
   getEventRef(sessionId: string, seq: number): EventRef | undefined;
 
+  /**
+   * Human prompts of a session (role 'user', visibility 'conversation',
+   * not synthetic), in seq order, with their stored preview text. Feeds
+   * the outline spine in the UI. Cap at 2000 items.
+   */
+  outline(sessionId: string): { seq: number; preview: string; timestamp?: string; offBranch: boolean }[];
+
   /** tool_use id → sub-session id, for the whole session */
   toolLinks(sessionId: string): Map<string, string>;
 
