@@ -7,7 +7,7 @@ import type { Block, ChatEvent, RawLine, SessionMeta } from '../../src/core/type
  * Tiny JSONL format for tests. One JSON object per line:
  *  {k:'user'|'assistant'|'detail'|'meta', text, ts?, off?:true, img?:true,
  *   tool?:{id,name,input,sub?}, n?:number (emit n events from this line)}
- *  {k:'hdr', parentToolUseId, title}   (no event; meta only)
+ *  {k:'hdr', parentToolUseId, title, cwd}   (no event; meta only; cwd → projectPath)
  * Files named agent-<parent>-<x>.jsonl are sub-agent sessions of <parent>.
  */
 class FakeParser implements SessionParser {
@@ -18,6 +18,7 @@ class FakeParser implements SessionParser {
   updated: string | undefined;
   off: number[] = [];
   parentToolUseId: string | undefined;
+  cwd: string | undefined;
   readonly file: DiscoveredFile;
   constructor(file: DiscoveredFile) {
     this.file = file;
@@ -33,6 +34,7 @@ class FakeParser implements SessionParser {
     if (rec.k === 'hdr') {
       this.parentToolUseId = rec.parentToolUseId;
       this.title = rec.title ?? this.title;
+      this.cwd = rec.cwd ?? this.cwd;
       return [];
     }
     if (rec.k === 'boom') throw new Error('boom');
@@ -80,6 +82,7 @@ class FakeParser implements SessionParser {
     if (this.title) meta.title = this.title;
     if (this.first) meta.firstPrompt = this.first;
     if (this.updated) meta.updatedAt = this.updated;
+    if (this.cwd) meta.projectPath = this.cwd;
     if (this.file.parentNativeId) {
       meta.parentSessionId = `fake:${this.file.parentNativeId}`;
       if (this.parentToolUseId) meta.parentToolUseId = this.parentToolUseId;

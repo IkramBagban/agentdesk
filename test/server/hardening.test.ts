@@ -69,7 +69,7 @@ beforeAll(() => {
   const store: IndexStore = {
     status: () => ({ state: 'idle', filesDone: 1, filesTotal: 1, sessionCount: 1 }),
     listProjects: () => [],
-    listSessions: () => ({ items: [meta] }),
+    listSessions: () => ({ items: [{ ...meta, children: [] }] }),
     getSession: (id) => (id === meta.id ? meta : undefined),
     getSubSessions: () => [],
     listEventRefs: () => ({ items: refs, total: refs.length }),

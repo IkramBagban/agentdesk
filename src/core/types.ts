@@ -189,6 +189,16 @@ export interface SessionMeta {
   gitBranch?: string;
   /** set when this session is a sub-agent run */
   parentSessionId?: string;
+  /**
+   * Set when the agent's own app records that another session started this
+   * one (e.g. Claude desktop "start session" / side chats). Not a sub-agent:
+   * these are full sessions, shown nested under their starter in the sidebar.
+   */
+  spawnedFromSessionId?: string;
+  /** 'spawned' = started as its own task; 'side' = a side chat / fork */
+  spawnKind?: 'spawned' | 'side';
+  /** archived in the agent's own app */
+  archived?: boolean;
   parentToolUseId?: string;
   agentDescription?: string;
   /** e.g. links to PRs / artifacts produced in the session */
@@ -202,4 +212,11 @@ export interface ProjectMeta {
   displayName: string;
   sessionCount: number;
   updatedAt?: string;
+}
+
+/** A session plus the sessions it started, for the nested sidebar. */
+export interface SessionNode extends SessionMeta {
+  children: SessionNode[];
+  /** latest updatedAt across this session and all its descendants */
+  activityAt?: string;
 }

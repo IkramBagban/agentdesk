@@ -184,6 +184,8 @@ export function createApp(deps: AppDeps): Hono {
       projectKey: q.project || undefined,
       q: q.q || undefined,
       includeSubSessions: q.includeSub === '1' || q.includeSub === 'true',
+      tree: q.tree === '1' || q.tree === 'true',
+      archived: q.archived === 'only' || q.archived === 'all' ? q.archived : 'hide',
       cursor: q.cursor || undefined,
       limit: intParam(q.limit, 50, 1, 200),
     });

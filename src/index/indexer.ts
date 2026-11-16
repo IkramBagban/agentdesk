@@ -5,6 +5,7 @@ import type { DiscoveredFile, SourceAdapter } from '../core/adapter.ts';
 import type { ChatEvent, RawLine, SessionMeta } from '../core/types.ts';
 import { digestEvent } from './extract.ts';
 import { readLines } from './lines.ts';
+import { refreshOverlays, type OverlayRefresh } from './overlays.ts';
 import { projectKeyFor } from './project.ts';
 
 export interface IndexProgress {
@@ -25,6 +26,8 @@ export interface IndexResult {
   skipped: number;
   removed: number;
   errors: FileFailure[];
+  /** set on full scans (no `only`): result of re-reading the adapters' app overlays */
+  overlays?: OverlayRefresh;
 }
 
 export interface IndexOptions {
@@ -441,6 +444,14 @@ export async function indexAll(
 ): Promise<IndexResult> {
   const result: IndexResult = { filesTotal: 0, indexed: 0, resumed: 0, skipped: 0, removed: 0, errors: [] };
   const candidates = new Map<string, Candidate>();
+  if (!opts.only) {
+    // cheap (no chat files involved), so do it first: titles / nesting show up right away
+    try {
+      result.overlays = await refreshOverlays(db, adapters);
+    } catch (err) {
+      result.errors.push({ path: '(app overlays)', message: err instanceof Error ? err.message : String(err) });
+    }
+  }
   const failedAdapters = new Set<string>();
 
   for (const adapter of adapters) {

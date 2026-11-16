@@ -6,7 +6,7 @@ import { DatabaseSync } from 'node:sqlite';
  * Bump when ANY table layout or the way rows are derived changes. A mismatch
  * deletes the database file and rebuilds from scratch.
  */
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 const DDL = `
 CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL);
@@ -85,6 +85,23 @@ CREATE TABLE IF NOT EXISTS tool_links (
   PRIMARY KEY (session_id, tool_use_id, origin)
 );
 CREATE INDEX IF NOT EXISTS tool_links_sub ON tool_links(sub_session_id);
+
+-- Per-session metadata from the agent's own app (SourceAdapter.overlays()),
+-- refreshed on every scan and when its files change, independently of chat
+-- files. Keyed by '<source>:<native id>' (the session id it applies to);
+-- rows may exist for sessions that are not indexed (yet).
+CREATE TABLE IF NOT EXISTS session_overlays (
+  session_id        TEXT PRIMARY KEY,
+  source_id         TEXT NOT NULL,
+  native_id         TEXT NOT NULL,
+  title             TEXT,
+  parent_native_id  TEXT,              -- native id of the session that started this one
+  spawn_kind        TEXT,              -- 'spawned' | 'side'
+  archived          INTEGER,           -- 1 / 0 / NULL (unknown)
+  project_path      TEXT,              -- folder to group under (e.g. the repo of a worktree)
+  created_at        TEXT
+);
+CREATE INDEX IF NOT EXISTS session_overlays_native ON session_overlays(source_id, native_id);
 
 -- rowid == events.id. Contentless: stores only the inverted index; snippets are
 -- rebuilt from the source file (see src/index/snippet.ts).

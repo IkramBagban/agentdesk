@@ -27,6 +27,31 @@ export interface SourceAdapter {
    * restoring state via `resume`). After the last line, call `finish()`.
    */
   createParser(file: DiscoveredFile): SessionParser;
+
+  /**
+   * Optional: per-session info the agent's app keeps OUTSIDE the chat files
+   * (display titles, which session started which, archived state). Read-only
+   * and best-effort: a missing folder or an unknown/changed format yields
+   * empty results, never an error. Keys are native session ids.
+   */
+  overlays?(): Promise<OverlayResult>;
+}
+
+export interface SessionOverlay {
+  title?: string;
+  /** native id of the session that started this one */
+  parentNativeId?: string;
+  spawnKind?: 'spawned' | 'side';
+  archived?: boolean;
+  /** project folder to group under (e.g. the repo a worktree session came from) */
+  projectPath?: string;
+  createdAt?: string;
+}
+
+export interface OverlayResult {
+  entries: Map<string, SessionOverlay>;
+  /** files/folders whose changes should trigger a re-read of overlays */
+  watchPaths: string[];
 }
 
 export interface DiscoveredFile {

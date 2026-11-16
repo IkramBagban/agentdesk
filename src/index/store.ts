@@ -1,4 +1,4 @@
-import type { ChatEvent, ProjectMeta, SessionMeta, SourceId } from '../core/types.ts';
+import type { ChatEvent, ProjectMeta, SessionMeta, SessionNode, SourceId } from '../core/types.ts';
 
 /**
  * Read API over the SQLite index, consumed by the HTTP server.
@@ -17,9 +17,22 @@ export interface IndexStore {
     /** substring match on title / first prompt */
     q?: string;
     includeSubSessions?: boolean;
+    /**
+     * Archived sessions (per the agent's app): 'hide' (default), 'only', 'all'.
+     */
+    archived?: 'hide' | 'only' | 'all';
+    /**
+     * When true, return only root sessions, each with `children` (sessions
+     * it started, recursively, newest activity first) and `activityAt`.
+     * Roots are ordered by activityAt desc so an active child lifts its tree.
+     * A session whose starter isn't indexed (or is filtered out) is a root.
+     * Children are listed under their root's project even if their own
+     * folder differs (e.g. a worktree).
+     */
+    tree?: boolean;
     cursor?: string;
     limit: number;
-  }): Page<SessionMeta>;
+  }): Page<SessionNode>;
 
   getSession(id: string): SessionMeta | undefined;
   getSubSessions(parentId: string): SessionMeta[];

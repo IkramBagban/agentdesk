@@ -39,6 +39,8 @@ const projectDir = () => join(claudeRoot, '-Users-alice-code-demo-app');
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'ah-real-'));
+  // never read the real Claude app folder from tests
+  process.env.AGENTDESK_CLAUDE_APP_DIR = join(dir, 'no-claude-app');
   claudeRoot = join(dir, 'claude');
   codexRoot = join(dir, 'codex');
   cpSync(join(FIX, 'claude-code/projects'), claudeRoot, { recursive: true });
@@ -47,6 +49,7 @@ beforeEach(() => {
   db = openTmp();
 });
 afterEach(() => {
+  delete process.env.AGENTDESK_CLAUDE_APP_DIR;
   for (const d of dbs.splice(0)) d.close();
   rmSync(dir, { recursive: true, force: true });
 });

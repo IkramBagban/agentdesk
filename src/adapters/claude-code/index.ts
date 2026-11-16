@@ -4,6 +4,7 @@ import type { DiscoveredFile, ParseLine, SourceAdapter } from '../../core/adapte
 import type { ChatEvent, RawLine } from '../../core/types.ts';
 import { convertRecord, materialize, parseJson } from './convert.ts';
 import { discover } from './discover.ts';
+import { readClaudeAppOverlays } from './overlays.ts';
 import { ClaudeCodeParser } from './parser.ts';
 
 const parseLine: ParseLine = (line: RawLine, firstSeq: number, _file: DiscoveredFile): ChatEvent[] => {
@@ -25,6 +26,7 @@ export const claudeCodeAdapter: SourceAdapter & { parseLine: ParseLine } = {
     return new ClaudeCodeParser(file);
   },
   parseLine,
+  overlays: () => readClaudeAppOverlays(),
 };
 
 export { ClaudeCodeParser };

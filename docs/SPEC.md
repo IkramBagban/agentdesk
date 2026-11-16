@@ -92,6 +92,8 @@ Tables (indicative):
   `dkey` = 64-bit hash of (source, record uuid, index within line), used to
   collapse copies of the same record across forked/resumed sessions.
 - `tool_links(session_id, tool_use_id, sub_session_id)`
+- `session_overlays(session_id PK, source_id, native_id, title, parent_native_id, spawn_kind, archived, project_path, created_at)`
+  — app metadata overlays (see below), never derived from chat files
 - `events_fts` — **contentless** FTS5 (`content=''`, `contentless_delete=1`),
   rowid = `events.id`. Meta events are not indexed. Text capped per event
   (16 KB conversation, 6 KB detail); base64-looking strings skipped. The
@@ -125,9 +127,9 @@ All under `/api`, JSON unless noted. Pagination via `cursor` (opaque) + `limit`.
 | Method & path | Returns |
 |---|---|
 | `GET /api/status` | `{version, sources:[{id,displayName,roots,sessionCount}], index:{state:'idle'|'indexing', done, total}}` |
-| `GET /api/projects?source=` | `ProjectMeta[]` sorted by updatedAt desc |
-| `GET /api/sessions?source=&project=&q=&cursor=&limit=50&includeSub=0` | `{items: SessionMeta[], nextCursor?}` sorted updatedAt desc. `q` filters title/firstPrompt |
-| `GET /api/sessions/:id` | `SessionMeta & {subSessions: SessionMeta[]}` |
+| `GET /api/projects?source=` | `ProjectMeta[]` sorted by updatedAt desc. `sessionCount` excludes archived sessions; started sessions count under their root's project |
+| `GET /api/sessions?source=&project=&q=&cursor=&limit=50&includeSub=0&tree=0&archived=hide` | `{items: SessionNode[], nextCursor?}`. `q` filters (app) title/firstPrompt. `archived=hide\|only\|all` (default `hide`). `project` matches the effective project (a started session is listed under its root's project). Flat (`tree=0`): sorted updatedAt desc, `children: []`. `tree=1`: roots only, each with recursive `children` (newest activity first) and `activityAt` = latest updatedAt in its subtree; roots sorted by activityAt desc (keyset cursor on activityAt, id). A session whose starter isn't indexed or is filtered out (source/archived/q) is a root. `includeSub` is ignored in tree mode |
+| `GET /api/sessions/:id` | `SessionMeta & {subSessions: SessionMeta[]}` (with app overlays applied) |
 | `GET /api/sessions/:id/events?from=0&limit=100&view=conversation\|all&dir=forward\|backward` | `{items: ChatEvent[], nextFrom?, prevFrom?, total}` — `view=conversation` returns visibility conversation+detail; `all` adds meta. Binary stripped → `blobPath`; text blocks > 20 KB truncated (`truncated`). `file_ref.exists` filled in. |
 | `GET /api/sessions/:id/events/:seq` | single full `ChatEvent` (no truncation, still no base64) |
 | `GET /api/sessions/:id/blob?seq=&path=` | raw bytes with correct Content-Type, `Cache-Control: private, max-age=31536000, immutable` |
@@ -138,6 +140,40 @@ All under `/api`, JSON unless noted. Pagination via `cursor` (opaque) + `limit`.
 | `GET /api/stream` | SSE: `index-progress`, `session-updated {id}` |
 
 Session ids contain `:` — URL-encode them.
+
+## App metadata overlays
+
+Some agents' apps keep per-session metadata outside the chat files. An
+adapter may expose it via `SourceAdapter.overlays()` → `{entries: Map<nativeId,
+SessionOverlay>, watchPaths}` (read-only, best-effort: missing folder or
+unknown format → empty). The indexer stores it in `session_overlays`,
+refreshed on every full scan and whenever a `watchPaths` entry changes (its own
+watcher; chat files are not re-parsed). The store applies it when reading:
+
+- `title` overrides the chat-derived title;
+- `parentNativeId` → `SessionMeta.spawnedFromSessionId` (`<source>:<parent native id>`)
+  plus `spawnKind` (`spawned` | `side`); cycles are broken deterministically
+  (the smallest id in the cycle becomes a root);
+- `archived` → `SessionMeta.archived` (hidden from lists by default);
+- project grouping: a session is grouped under its overlay `projectPath`, or —
+  for any agent — under `<repo>` when its folder is inside
+  `<repo>/.claude/worktrees/<name>`; a started session is then listed under its
+  ROOT starter's project. `projectPath` stays the session's own folder.
+
+Claude Code: the Claude desktop app writes
+`<app dir>/claude-code-sessions/<account>/<org>/local_<uuid>.json`
+(`~/Library/Application Support/Claude` on macOS, `%APPDATA%\Claude` on Windows,
+`$XDG_CONFIG_HOME/Claude` or `~/.config/Claude` on Linux; override with
+`AGENTDESK_CLAUDE_APP_DIR`). Undocumented; used fields: `cliSessionId` (= the
+chat file's session id), `sessionId` (`local_…`), `title` (ignored when empty
+or a placeholder like "New session"), `isArchived`, `createdAt` (ms),
+`cwd`/`originCwd`/`worktreePath` (worktree sessions group under `originCwd`),
+`spawnedFrom.sessionId` (a `local_…` id, mapped to that session's
+`cliSessionId`; `spawnKind` is `side` when `spawnedFrom.userFork` or
+`spawnedFrom.btw` is true, else `spawned` — `sideSession` is set on every
+spawned session so it does not distinguish them) and `forkedFromSessionId`
+(fallback parent, kind `side`). All accounts/orgs are read; unparsable files
+are skipped.
 
 ## Security
 

@@ -1,8 +1,9 @@
 import type { DatabaseSync } from 'node:sqlite';
-import type { ChatEvent, ProjectMeta, SessionMeta, SourceId } from '../core/types.ts';
+import type { ChatEvent, ProjectMeta, SessionMeta, SessionNode, SourceId } from '../core/types.ts';
 import { NO_FOLDER_KEY } from './project.ts';
 import { escapeHtml, makeSnippet, sanitizeFtsQuery } from './snippet.ts';
 import type { EventRef, IndexChange, IndexStatus, IndexStore, Page, SearchHit } from './store.ts';
+import { buildGraph, type GraphNode, type GraphOverlayRow, type GraphSessionRow, type SessionGraph } from './tree.ts';
 
 type Row = Record<string, unknown>;
 
@@ -125,31 +126,131 @@ export class SqliteIndexStore implements IndexStore {
     return st;
   }
 
+  /**
+   * Spawn graph over top-level sessions + app overlays, rebuilt only when the
+   * database changed (data_version covers other connections' commits,
+   * total_changes() this connection's own).
+   */
+  private graphCache: { key: string; graph: SessionGraph } | undefined;
+  private graph(): SessionGraph {
+    const v = this.db.prepare('SELECT total_changes() AS t').get() as Row;
+    const dv = this.db.prepare('PRAGMA data_version').get() as Row;
+    const key = `${String(dv.data_version)}:${String(v.t)}`;
+    if (this.graphCache?.key === key) return this.graphCache.graph;
+    const rows = (
+      this.db
+        .prepare(
+          'SELECT id, source_id, native_id, project_key, project_path, updated_at FROM sessions WHERE parent_session_id IS NULL',
+        )
+        .all() as Row[]
+    ).map((r): GraphSessionRow => {
+      const g: GraphSessionRow = {
+        id: String(r.id),
+        sourceId: String(r.source_id),
+        nativeId: String(r.native_id),
+        projectKey: String(r.project_key),
+        updatedAt: String(r.updated_at ?? ''),
+      };
+      const pp = optStr(r.project_path);
+      if (pp) g.projectPath = pp;
+      return g;
+    });
+    const overlays = (
+      this.db
+        .prepare('SELECT source_id, native_id, title, parent_native_id, spawn_kind, archived, project_path FROM session_overlays')
+        .all() as Row[]
+    ).map((r): GraphOverlayRow => {
+      const o: GraphOverlayRow = { sourceId: String(r.source_id), nativeId: String(r.native_id) };
+      const t = optStr(r.title);
+      if (t) o.title = t;
+      const p = optStr(r.parent_native_id);
+      if (p) o.parentNativeId = p;
+      if (r.spawn_kind === 'side' || r.spawn_kind === 'spawned') o.spawnKind = r.spawn_kind;
+      if (r.archived != null) o.archived = Number(r.archived) === 1;
+      const pp = optStr(r.project_path);
+      if (pp) o.projectPath = pp;
+      return o;
+    });
+    const graph = buildGraph(rows, overlays);
+    this.graphCache = { key, graph };
+    return graph;
+  }
+
+  /** Apply what the graph knows (app title, starter, archived, grouping) to a stored session. */
+  private overlay(s: SessionMeta, g: SessionGraph = this.graph()): SessionMeta {
+    let n = g.nodes.get(s.id);
+    if (!n) {
+      // sub-agent run: grouped with its parent session
+      const parent = s.parentSessionId ? g.nodes.get(s.parentSessionId) : undefined;
+      if (parent) s.projectKey = parent.key;
+      return s;
+    }
+    if (n.title) s.title = n.title;
+    s.projectKey = n.key;
+    if (n.parentId) {
+      s.spawnedFromSessionId = n.parentId;
+      if (n.spawnKind) s.spawnKind = n.spawnKind;
+    }
+    if (n.archived) s.archived = true;
+    return s;
+  }
+
   listProjects(opts: { sourceId?: SourceId }): ProjectMeta[] {
     // Keys are agent-agnostic (see projectKeyFor), so one folder used by several
-    // agents is one project. With max(), SQLite takes the bare source_id from the
-    // most recently updated session: that source is reported as the project's.
-    const rows = this.db
-      .prepare(
-        `SELECT project_key, source_id, max(updated_at) AS updated_at, max(project_path) AS project_path, count(*) AS n
-         FROM sessions WHERE parent_session_id IS NULL AND (?1 IS NULL OR source_id = ?1)
-         GROUP BY project_key ORDER BY 3 DESC, project_key`,
-      )
-      .all(opts.sourceId ?? null) as Row[];
-    return rows.map((r) => {
-      const key = String(r.project_key);
-      const path = key.startsWith('path:') ? key.slice(5) : key === NO_FOLDER_KEY ? undefined : optStr(r.project_path);
+    // agents is one project; started sessions count under their root starter's
+    // project. The source of the most recently updated session is reported as
+    // the project's. Archived sessions are not counted (a project with only
+    // archived sessions is still listed, with sessionCount 0).
+    const groups = new Map<string, { latest: GraphNode; n: number; path?: string }>();
+    for (const node of this.graph().nodes.values()) {
+      if (opts.sourceId && node.sourceId !== opts.sourceId) continue;
+      const g = groups.get(node.key);
+      if (!g) {
+        groups.set(node.key, { latest: node, n: node.archived ? 0 : 1, ...(node.path ? { path: node.path } : {}) });
+        continue;
+      }
+      if (!node.archived) g.n++;
+      if (node.updatedAt > g.latest.updatedAt) g.latest = node;
+      if (node.path && (!g.path || node.path > g.path)) g.path = node.path;
+    }
+    const list = [...groups.entries()].sort(([ka, a], [kb, b]) =>
+      a.latest.updatedAt !== b.latest.updatedAt ? (a.latest.updatedAt < b.latest.updatedAt ? 1 : -1) : ka < kb ? -1 : ka > kb ? 1 : 0,
+    );
+    return list.map(([key, g]) => {
+      const path = key.startsWith('path:') ? key.slice(5) : key === NO_FOLDER_KEY ? undefined : g.path;
       const p: ProjectMeta = {
-        key: String(r.project_key),
-        sourceId: String(r.source_id),
-        displayName: displayName(String(r.project_key), path),
-        sessionCount: Number(r.n),
+        key,
+        sourceId: g.latest.sourceId,
+        displayName: displayName(key, path),
+        sessionCount: g.n,
       };
       if (path) p.path = path;
-      const u = optStr(r.updated_at);
-      if (u) p.updatedAt = u;
+      if (g.latest.updatedAt) p.updatedAt = g.latest.updatedAt;
       return p;
     });
+  }
+
+  /** ids whose (app or own) title or first prompt contains `q` */
+  private matchQ(q: string): Set<string> {
+    const like = `%${likeEscape(q.trim().slice(0, 500))}%`;
+    const rows = this.db
+      .prepare(
+        `SELECT s.id FROM sessions s
+         LEFT JOIN session_overlays o ON o.source_id = s.source_id AND o.native_id = s.native_id
+         WHERE COALESCE(o.title, s.title) LIKE ?1 ESCAPE '\\' OR s.title LIKE ?1 ESCAPE '\\' OR s.first_prompt LIKE ?1 ESCAPE '\\'`,
+      )
+      .all(like) as Row[];
+    return new Set(rows.map((r) => String(r.id)));
+  }
+
+  private fullRows(ids: readonly string[], g: SessionGraph): Map<string, SessionMeta> {
+    const out = new Map<string, SessionMeta>();
+    if (!ids.length) return out;
+    const rows = this.db
+      .prepare(`SELECT ${SESSION_COLS} FROM sessions WHERE id IN (SELECT value FROM json_each(?))`)
+      .all(JSON.stringify(ids)) as Row[];
+    for (const r of rows) out.set(String(r.id), this.overlay(rowToSession(r), g));
+    return out;
   }
 
   listSessions(opts: {
@@ -157,54 +258,139 @@ export class SqliteIndexStore implements IndexStore {
     projectKey?: string;
     q?: string;
     includeSubSessions?: boolean;
+    archived?: 'hide' | 'only' | 'all';
+    tree?: boolean;
     cursor?: string;
     limit: number;
-  }): Page<SessionMeta> {
-    const where: string[] = [];
-    const params: (string | number | null)[] = [];
-    if (opts.sourceId) {
-      where.push('source_id = ?');
-      params.push(opts.sourceId);
-    }
-    if (opts.projectKey) {
-      where.push('project_key = ?');
-      params.push(opts.projectKey);
-    }
-    if (!opts.includeSubSessions) where.push('parent_session_id IS NULL');
-    if (opts.q?.trim()) {
-      const like = `%${likeEscape(opts.q.trim().slice(0, 500))}%`;
-      where.push("(title LIKE ? ESCAPE '\\' OR first_prompt LIKE ? ESCAPE '\\')");
-      params.push(like, like);
-    }
-    const cur = unb64<{ u: string; i: string }>(opts.cursor);
-    if (cur && typeof cur.u === 'string' && typeof cur.i === 'string') {
-      where.push('(updated_at, id) < (?, ?)');
-      params.push(cur.u, cur.i);
-    }
+  }): Page<SessionNode> {
+    const g = this.graph();
+    const archived = opts.archived === 'only' || opts.archived === 'all' ? opts.archived : 'hide';
+    const qIds = opts.q?.trim() ? this.matchQ(opts.q) : undefined;
     const limit = Math.max(1, Math.min(opts.limit, 500));
-    const sql = `SELECT ${SESSION_COLS} FROM sessions ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
-      ORDER BY updated_at DESC, id DESC LIMIT ?`;
-    const rows = this.db.prepare(sql).all(...params, limit + 1) as Row[];
-    const more = rows.length > limit;
-    const page = more ? rows.slice(0, limit) : rows;
-    const out: Page<SessionMeta> = { items: page.map(rowToSession) };
-    if (more) {
-      const last = page[page.length - 1] as Row;
-      out.nextCursor = b64({ u: String(last.updated_at), i: String(last.id) });
+    const cur = unb64<{ u: string; i: string }>(opts.cursor);
+    const after = cur && typeof cur.u === 'string' && typeof cur.i === 'string' ? cur : undefined;
+    // (u, id) DESC order and keyset, comparing like SQLite's binary collation
+    const desc = (a: { u: string; i: string }, b: { u: string; i: string }) =>
+      a.u !== b.u ? (a.u < b.u ? 1 : -1) : a.i < b.i ? 1 : a.i > b.i ? -1 : 0;
+    const isAfter = (x: { u: string; i: string }) => !after || x.u < after.u || (x.u === after.u && x.i < after.i);
+
+    const pass = (sourceId: string, key: string, isArchived: boolean, id: string) =>
+      (!opts.sourceId || sourceId === opts.sourceId) &&
+      (!opts.projectKey || key === opts.projectKey) &&
+      (archived === 'all' || (archived === 'only') === isArchived) &&
+      (!qIds || qIds.has(id));
+
+    const included = new Map<string, GraphNode>();
+    for (const n of g.nodes.values()) if (pass(n.sourceId, n.key, n.archived, n.id)) included.set(n.id, n);
+
+    if (!opts.tree) {
+      const items: { u: string; i: string }[] = [...included.values()].map((n) => ({ u: n.updatedAt, i: n.id }));
+      if (opts.includeSubSessions) {
+        const subs = this.db
+          .prepare('SELECT id, source_id, project_key, updated_at, parent_session_id FROM sessions WHERE parent_session_id IS NOT NULL')
+          .all() as Row[];
+        for (const r of subs) {
+          const parent = g.nodes.get(String(r.parent_session_id));
+          const id = String(r.id);
+          if (pass(String(r.source_id), parent?.key ?? String(r.project_key), parent?.archived ?? false, id)) {
+            items.push({ u: String(r.updated_at ?? ''), i: id });
+          }
+        }
+      }
+      const sorted = items.filter(isAfter).sort(desc);
+      const page = sorted.slice(0, limit);
+      const full = this.fullRows(page.map((p) => p.i), g);
+      const out: Page<SessionNode> = {
+        items: page.flatMap((p) => {
+          const m = full.get(p.i);
+          return m ? [{ ...m, children: [], ...(m.updatedAt ? { activityAt: m.updatedAt } : {}) }] : [];
+        }),
+      };
+      const last = page[page.length - 1];
+      if (sorted.length > limit && last) out.nextCursor = b64({ u: last.u, i: last.i });
+      return out;
     }
+
+    // tree: a session is a root unless its starter is included too
+    const kids = new Map<string, GraphNode[]>();
+    const roots: GraphNode[] = [];
+    for (const n of included.values()) {
+      if (n.parentId && included.has(n.parentId)) {
+        const k = kids.get(n.parentId);
+        if (k) k.push(n);
+        else kids.set(n.parentId, [n]);
+      } else roots.push(n);
+    }
+    const activity = new Map<string, string>();
+    const activityOf = (root: GraphNode): string => {
+      // iterative post-order (the graph is acyclic; `seen` is a belt-and-braces guard)
+      const stack: [GraphNode, boolean][] = [[root, false]];
+      const seen = new Set<string>();
+      while (stack.length) {
+        const [n, expanded] = stack.pop()!;
+        if (expanded) {
+          let a = n.updatedAt;
+          for (const c of kids.get(n.id) ?? []) {
+            const ca = activity.get(c.id) ?? c.updatedAt;
+            if (ca > a) a = ca;
+          }
+          activity.set(n.id, a);
+          continue;
+        }
+        if (seen.has(n.id)) continue;
+        seen.add(n.id);
+        stack.push([n, true]);
+        for (const c of kids.get(n.id) ?? []) if (!seen.has(c.id)) stack.push([c, false]);
+      }
+      return activity.get(root.id) ?? root.updatedAt;
+    };
+    const ranked = roots.map((r) => ({ u: activityOf(r), i: r.id })).filter(isAfter).sort(desc);
+    const page = ranked.slice(0, limit);
+
+    // collect every node in the page's subtrees, then load their rows in one query
+    const want: string[] = [];
+    const seen = new Set<string>();
+    const stack = page.map((p) => p.i);
+    while (stack.length) {
+      const id = stack.pop()!;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      want.push(id);
+      for (const c of kids.get(id) ?? []) stack.push(c.id);
+    }
+    const full = this.fullRows(want, g);
+    const built = new Set<string>();
+    const build = (id: string): SessionNode | undefined => {
+      const m = full.get(id);
+      if (!m || built.has(id)) return undefined;
+      built.add(id);
+      const children = (kids.get(id) ?? [])
+        .map((c) => ({ u: activity.get(c.id) ?? c.updatedAt, i: c.id }))
+        .sort(desc)
+        .flatMap((c) => {
+          const b = build(c.i);
+          return b ? [b] : [];
+        });
+      const a = activity.get(id) ?? m.updatedAt;
+      return { ...m, children, ...(a ? { activityAt: a } : {}) };
+    };
+    const out: Page<SessionNode> = { items: page.flatMap((p) => { const b = build(p.i); return b ? [b] : []; }) };
+    const last = page[page.length - 1];
+    if (ranked.length > limit && last) out.nextCursor = b64({ u: last.u, i: last.i });
     return out;
   }
 
   getSession(id: string): SessionMeta | undefined {
     const r = this.db.prepare(`SELECT ${SESSION_COLS} FROM sessions WHERE id = ?`).get(id) as Row | undefined;
-    return r ? rowToSession(r) : undefined;
+    return r ? this.overlay(rowToSession(r)) : undefined;
   }
 
   getSubSessions(parentId: string): SessionMeta[] {
     const rows = this.db
       .prepare(`SELECT ${SESSION_COLS} FROM sessions WHERE parent_session_id = ? ORDER BY started_at, id`)
       .all(parentId) as Row[];
-    return rows.map(rowToSession);
+    const g = this.graph();
+    return rows.map((r) => this.overlay(rowToSession(r), g));
   }
 
   listEventRefs(opts: {
@@ -324,9 +510,12 @@ export class SqliteIndexStore implements IndexStore {
       where.push('s.source_id = ?');
       params.push(opts.sourceId);
     }
+    const g = this.graph();
     if (opts.projectKey) {
-      where.push('s.project_key = ?');
-      params.push(opts.projectKey);
+      // effective project (started sessions follow their root; sub-agent runs their parent)
+      const ids = [...g.nodes.values()].filter((n) => n.key === opts.projectKey).map((n) => n.id);
+      where.push('COALESCE(s.parent_session_id, s.id) IN (SELECT value FROM json_each(?))');
+      params.push(JSON.stringify(ids));
     }
     // Copies of the same record (forked / resumed sessions, sub-agent files copied
     // into each fork) share a dkey: keep one hit per dkey, preferring the on-branch
@@ -336,7 +525,7 @@ export class SqliteIndexStore implements IndexStore {
       .prepare(
         `WITH m AS (
            SELECT e.id AS eid, e.session_id, e.seq, e.role, e.ts, e.preview, e.off_branch, e.dkey,
-                  s.title, s.project_key, s.project_path, s.updated_at,
+                  s.title, s.project_key, s.project_path, s.updated_at, s.parent_session_id,
                   bm25(events_fts) * ${RANK_BOOST} AS rank
            FROM events_fts JOIN events e ON e.id = events_fts.rowid JOIN sessions s ON s.id = e.session_id
            WHERE ${where.join(' AND ')}
@@ -344,7 +533,7 @@ export class SqliteIndexStore implements IndexStore {
            SELECT *, row_number() OVER (PARTITION BY COALESCE(dkey, -eid) ORDER BY off_branch, updated_at DESC, eid) AS copy
            FROM m
          )
-         SELECT eid, session_id, seq, role, ts, preview, title, project_key, project_path FROM d
+         SELECT eid, session_id, seq, role, ts, preview, title, project_key, project_path, parent_session_id FROM d
          WHERE copy = 1
          ORDER BY rank, COALESCE(ts, updated_at) DESC, eid
          LIMIT ? OFFSET ?`,
@@ -354,15 +543,17 @@ export class SqliteIndexStore implements IndexStore {
     const page = more ? ranked.slice(0, limit) : ranked;
     const items: SearchHit[] = page.map((r) => {
       const preview = optStr(r.preview);
+      const node = g.nodes.get(String(r.session_id));
+      const owner = node ?? g.nodes.get(String(r.parent_session_id ?? ''));
       const hit: SearchHit = {
         sessionId: String(r.session_id),
         seq: Number(r.seq),
-        projectKey: String(r.project_key),
+        projectKey: owner?.key ?? String(r.project_key),
         role: String(r.role) as ChatEvent['role'],
         // provisional: the server rebuilds it from the source file (see /api/search)
         snippet: preview ? (makeSnippet(preview, opts.q) ?? escapeHtml(preview)) : '',
       };
-      const t = optStr(r.title);
+      const t = node?.title ?? optStr(r.title);
       if (t) hit.sessionTitle = t;
       const pp = optStr(r.project_path);
       if (pp && r.project_key !== NO_FOLDER_KEY) hit.projectPath = pp;

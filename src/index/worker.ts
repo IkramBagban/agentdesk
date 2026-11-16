@@ -3,6 +3,10 @@
  *   {type:'progress', status}  {type:'session-updated', sessionId}  {type:'error', message}
  * Messages in: {type:'rescan'} | {type:'stop'}.
  *
+ * Every full scan also re-reads the adapters' app overlays (titles, nesting,
+ * archived state); their folders are watched separately and a change there
+ * only re-reads overlays, never chat files.
+ *
  * Adapters are loaded here (functions can't cross threads): from
  * workerData.adaptersModule if given (tests), otherwise the registry
  * `../adapters/index.ts` — a literal dynamic import so esbuild bundles it
@@ -12,6 +16,7 @@ import { parentPort, workerData } from 'node:worker_threads';
 import { pathToFileURL } from 'node:url';
 import type { SourceAdapter } from '../core/adapter.ts';
 import { indexAll, type RootsMap } from './indexer.ts';
+import { refreshOverlays } from './overlays.ts';
 import { openDb } from './schema.ts';
 import { watchRoots } from './watch.ts';
 
@@ -66,6 +71,50 @@ async function main(): Promise<void> {
     ...(lastError ? { lastError } : {}),
   });
 
+  // --- app overlays: watched apart from chat files; serialized with run() (one connection, explicit transactions)
+  let overlayPending = false;
+  let overlayWatchKey = '';
+  let stopOverlayWatch: (() => void) | undefined;
+  const setOverlayWatch = (paths: Map<string, string[]> | undefined) => {
+    if (!wd.watch || !paths || stopped) return;
+    const all = [...new Set([...paths.values()].flat())].sort();
+    const key = all.join('\0');
+    if (key === overlayWatchKey) return;
+    overlayWatchKey = key;
+    stopOverlayWatch?.();
+    stopOverlayWatch = all.length ? watchRoots(all, () => void overlaysOnly()) : undefined;
+  };
+  async function overlaysOnly(): Promise<void> {
+    if (stopped) return;
+    if (running) {
+      overlayPending = true;
+      return;
+    }
+    running = true;
+    try {
+      const res = await refreshOverlays(db, adapters);
+      setOverlayWatch(res.watchPaths);
+      for (const sessionId of res.changed) port.postMessage({ type: 'session-updated', sessionId });
+    } catch (err) {
+      lastError = err instanceof Error ? err.message : String(err);
+      port.postMessage({ type: 'error', message: lastError });
+    } finally {
+      running = false;
+      drain();
+    }
+  }
+  function drain(): void {
+    if (stopped) return;
+    if (overlayPending) {
+      overlayPending = false;
+      void overlaysOnly();
+      return;
+    }
+    const q = queued;
+    queued = undefined;
+    if (q) void run(q.all ? undefined : q.only);
+  }
+
   async function run(only?: Set<string>): Promise<void> {
     if (running) {
       queued = { all: !only || !!queued?.all, only: new Set([...(queued?.only ?? []), ...(only ?? [])]) };
@@ -90,6 +139,11 @@ async function main(): Promise<void> {
           onSessionUpdated: (sessionId) => port.postMessage({ type: 'session-updated', sessionId }),
         },
       );
+      if (res.overlays) {
+        overlayPending = false; // just re-read
+        setOverlayWatch(res.overlays.watchPaths);
+        for (const sessionId of res.overlays.changed) port.postMessage({ type: 'session-updated', sessionId });
+      }
       lastError = res.errors.length ? `${res.errors.length} file(s) failed: ${res.errors[0]!.path}: ${res.errors[0]!.message}` : undefined;
       port.postMessage({ type: 'progress', status: status('idle', res.filesTotal, res.filesTotal) });
     } catch (err) {
@@ -98,9 +152,7 @@ async function main(): Promise<void> {
       port.postMessage({ type: 'progress', status: status('idle', 0, 0) });
     } finally {
       running = false;
-      const q = queued;
-      queued = undefined;
-      if (q && !stopped) void run(q.all ? undefined : q.only);
+      drain();
     }
   }
 
@@ -118,6 +170,7 @@ async function main(): Promise<void> {
       stopped = true;
       signal.aborted = true;
       for (const s of stopWatch) s();
+      stopOverlayWatch?.();
       const finish = () => {
         db.close();
         port.postMessage({ type: 'stopped' });

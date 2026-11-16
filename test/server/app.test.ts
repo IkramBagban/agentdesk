@@ -49,11 +49,16 @@ const adapter: SourceAdapter & { parseLine: ParseLine } = {
   parseLine,
 };
 
+let lastListOpts: Parameters<IndexStore['listSessions']>[0] | undefined;
+
 function makeStore(meta: SessionMeta): IndexStore {
   return {
     status: () => ({ state: 'idle', filesDone: 1, filesTotal: 1, sessionCount: 1 }),
     listProjects: () => [{ key: 'p', sourceId: 'fake', displayName: 'p', sessionCount: 1 }],
-    listSessions: () => ({ items: [meta] }),
+    listSessions: (opts) => {
+      lastListOpts = opts;
+      return { items: [{ ...meta, children: [] }] };
+    },
     getSession: (id) => (id === meta.id ? meta : undefined),
     getSubSessions: () => [],
     listEventRefs: ({ from, limit }) => {
@@ -125,6 +130,22 @@ const auth = { Authorization: `Bearer ${TOKEN}` };
 const req = (path: string, headers: Record<string, string> = {}) =>
   app.request(`http://${HOST}${path}`, { headers: { Host: HOST, ...headers } });
 const authed = (path: string) => req(path, auth);
+
+describe('GET /api/sessions', () => {
+  it('passes tree and archived through (archived defaults to hide)', async () => {
+    const res = await authed('/api/sessions?tree=1&archived=only&project=p');
+    expect(res.status).toBe(200);
+    expect(lastListOpts).toMatchObject({ tree: true, archived: 'only', projectKey: 'p' });
+    const body = (await res.json()) as { items: { children: unknown[] }[] };
+    expect(body.items[0]!.children).toEqual([]);
+    await authed('/api/sessions');
+    expect(lastListOpts).toMatchObject({ tree: false, archived: 'hide' });
+    await authed('/api/sessions?archived=bogus&tree=true');
+    expect(lastListOpts).toMatchObject({ tree: true, archived: 'hide' });
+    await authed('/api/sessions?archived=all');
+    expect(lastListOpts?.archived).toBe('all');
+  });
+});
 
 describe('security', () => {
   it('rejects a foreign Host header', async () => {
