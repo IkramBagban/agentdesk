@@ -50,17 +50,28 @@ function useLiveUpdates() {
   const qc = useQueryClient();
   useEffect(() => {
     const es = new EventSource('/api/stream');
-    let pending = false;
-    const refreshLists = () => {
-      if (pending) return;
-      pending = true;
-      setTimeout(() => {
-        pending = false;
-        void qc.invalidateQueries({ queryKey: ['sessions'] });
-        void qc.invalidateQueries({ queryKey: ['projects'] });
-        void qc.invalidateQueries({ queryKey: ['status'] });
-      }, 1500);
+    // A live chat changes every few seconds; reloading every list page on each
+    // change adds up to thousands of requests over a session. Refresh at most
+    // every 5 s, and not at all while the tab is in the background (catch up
+    // when it's shown again).
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let dirty = false;
+    const flush = () => {
+      timer = undefined;
+      if (document.hidden) return;
+      dirty = false;
+      void qc.invalidateQueries({ queryKey: ['sessions'] });
+      void qc.invalidateQueries({ queryKey: ['projects'] });
+      void qc.invalidateQueries({ queryKey: ['status'] });
     };
+    const refreshLists = () => {
+      dirty = true;
+      timer ??= setTimeout(flush, 5000);
+    };
+    const onVisible = () => {
+      if (!document.hidden && dirty && !timer) flush();
+    };
+    document.addEventListener('visibilitychange', onVisible);
     es.addEventListener('index-progress', refreshLists);
     es.addEventListener('session-updated', (e) => {
       refreshLists();
@@ -73,7 +84,11 @@ function useLiveUpdates() {
         /* ignore */
       }
     });
-    return () => es.close();
+    return () => {
+      es.close();
+      if (timer) clearTimeout(timer);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, [qc]);
 }
 

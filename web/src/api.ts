@@ -1,6 +1,7 @@
-import type { ChatEvent, ProjectMeta, SessionMeta } from '../../src/core/types.ts';
+import type { ChatEvent, ProjectMeta, SessionMeta, SessionNode } from '../../src/core/types.ts';
 
-export type { ChatEvent, ProjectMeta, SessionMeta };
+export type { ChatEvent, ProjectMeta, SessionMeta, SessionNode };
+export type ArchivedFilter = 'hide' | 'only' | 'all';
 export type { Block, ImageBlock, ToolUseBlock, ToolResultBlock } from '../../src/core/types.ts';
 
 export interface Status {
@@ -73,8 +74,8 @@ const enc = encodeURIComponent;
 export const api = {
   status: () => get<Status>('/api/status'),
   projects: (source?: string) => get<ProjectMeta[]>('/api/projects', { source }),
-  sessions: (p: { source?: string; project?: string; q?: string; cursor?: string; limit?: number }) =>
-    get<Page<SessionMeta>>('/api/sessions', { ...p, limit: p.limit ?? 50 }),
+  sessions: (p: { source?: string; project?: string; q?: string; cursor?: string; limit?: number; tree?: boolean; archived?: ArchivedFilter }) =>
+    get<Page<SessionNode>>('/api/sessions', { ...p, tree: p.tree ? 1 : undefined, limit: p.limit ?? 50 }),
   session: (id: string) => get<SessionMeta & { subSessions: SessionMeta[] }>(`/api/sessions/${enc(id)}`),
   events: (id: string, p: { from: number; limit?: number; view: View; dir?: 'forward' | 'backward' }) =>
     get<EventPage>(`/api/sessions/${enc(id)}/events`, { from: p.from, limit: p.limit ?? 100, view: p.view, dir: p.dir }),

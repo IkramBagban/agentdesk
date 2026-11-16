@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useInfiniteQuery, useQueries, useQuery } from '@tanstack/react-query';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { ChevronRight, Folder, FolderOpen, Layers, Monitor, Moon, PanelLeftClose, Search, Sun, X } from 'lucide-react';
-import { api, type ProjectMeta, type SearchHit, type SessionMeta, type Status } from '../api.ts';
+import { Archive, ChevronRight, Folder, FolderOpen, Layers, Monitor, Moon, PanelLeftClose, Search, Sun, X } from 'lucide-react';
+import { api, type ArchivedFilter, type ProjectMeta, type SearchHit, type SessionMeta, type SessionNode, type Status } from '../api.ts';
 import { navigate, useRoute } from '../router.ts';
 import { isScratch, projectName, relDate, sourceLabel } from '../format.ts';
 import { IconButton, Segmented } from './ui.tsx';
@@ -29,10 +29,31 @@ function useMode(): [Mode, (m: Mode) => void] {
   return [mode, set];
 }
 
+function useShowArchived(): [boolean, (v: boolean) => void] {
+  const [v, setV] = useState(() => {
+    try {
+      return localStorage.getItem('agentdesk-show-archived') === '1';
+    } catch {
+      return false;
+    }
+  });
+  const set = useCallback((next: boolean) => {
+    setV(next);
+    try {
+      localStorage.setItem('agentdesk-show-archived', next ? '1' : '0');
+    } catch {
+      /* ignore */
+    }
+  }, []);
+  return [v, set];
+}
+
 export function Sidebar({ status, theme, onTheme, onClose }: { status?: Status; theme: ThemePref; onTheme: (t: ThemePref) => void; onClose: () => void }) {
   const route = useRoute();
   const [text, setText] = useState(route.q ?? '');
   const [mode, setMode] = useMode();
+  const [showArchived, setShowArchived] = useShowArchived();
+  const archived: ArchivedFilter = showArchived ? 'all' : 'hide';
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Keep the box in sync when the URL changes (back/forward).
@@ -123,6 +144,16 @@ export function Sidebar({ status, theme, onTheme, onClose }: { status?: Status; 
               {m === 'projects' ? 'Projects' : 'Recent'}
             </button>
           ))}
+          <button
+            type="button"
+            aria-pressed={showArchived}
+            title={showArchived ? 'Hide archived chats' : 'Show archived chats'}
+            aria-label={showArchived ? 'Hide archived chats' : 'Show archived chats'}
+            onClick={() => setShowArchived(!showArchived)}
+            className={`ml-0.5 rounded-md p-1.5 transition-colors ${showArchived ? 'bg-hover text-ink' : 'text-faint hover:text-muted'}`}
+          >
+            <Archive size={13} />
+          </button>
         </div>
       )}
 
@@ -136,7 +167,7 @@ export function Sidebar({ status, theme, onTheme, onClose }: { status?: Status; 
         </div>
       )}
 
-      {route.q ? <SearchResults q={route.q} projectMap={projectMap} /> : mode === 'projects' && !route.project ? <ProjectTree projectMap={projectMap} /> : <RecentList projectMap={projectMap} />}
+      {route.q ? <SearchResults q={route.q} projectMap={projectMap} /> : mode === 'projects' && !route.project ? <ProjectTree projectMap={projectMap} archived={archived} /> : <RecentList projectMap={projectMap} archived={archived} />}
 
       <Footer status={status} theme={theme} onTheme={onTheme} />
     </aside>
@@ -156,7 +187,7 @@ function Logo() {
 const SCRATCH = '__scratch';
 
 function labelFor(key: string, projects: Map<string, ProjectMeta>) {
-  if (key === SCRATCH) return 'Scratch chats';
+  if (key === SCRATCH) return 'No folder';
   if (key.startsWith('path:')) return projectName(key.slice(5));
   const p = projects.get(key);
   return p?.displayName || projectName(p?.path, key);
@@ -164,8 +195,34 @@ function labelFor(key: string, projects: Map<string, ProjectMeta>) {
 
 /** One folder can hold chats from several agents: group by path, not by source key. */
 function groupKey(s: { projectPath?: string; projectKey: string }) {
-  if (isScratch(s)) return SCRATCH;
+  // The index keys projects by folder (and by where the agent's app shows a
+  // chat), and files started chats under their root's project: trust it first.
+  if (s.projectKey.startsWith('path:')) return s.projectKey;
+  if (s.projectKey === 'nofolder:' || isScratch(s)) return SCRATCH;
   return s.projectPath ? `path:${s.projectPath.replace(/[\\/]+$/, '')}` : s.projectKey;
+}
+
+/** Does this session or anything it started match `id`? */
+function contains(n: SessionNode, id?: string): boolean {
+  return !!id && (n.id === id || n.children.some((c) => contains(c, id)));
+}
+
+function countTree(n: SessionNode): number {
+  return 1 + n.children.reduce((a, c) => a + countTree(c), 0);
+}
+
+type ChatItem = { t: 'chat'; key: string; s: SessionNode; depth: number; last: boolean; rails: boolean[] };
+
+/**
+ * Flatten a session and the sessions it started into rows. `rails[i]` says
+ * whether the ancestor at depth i+1 has later siblings (so its vertical line
+ * continues past this row).
+ */
+function flatten(n: SessionNode, closed: Set<string>, activeId: string | undefined, out: ChatItem[], depth = 0, last = true, rails: boolean[] = []) {
+  out.push({ t: 'chat', key: n.id, s: n, depth, last, rails });
+  const open = !closed.has(n.id) || n.children.some((c) => contains(c, activeId));
+  if (!open) return;
+  n.children.forEach((c, i) => flatten(c, closed, activeId, out, depth + 1, i === n.children.length - 1, depth === 0 ? [] : [...rails, !last]));
 }
 
 function useInfiniteList<T>(key: unknown[], fetchPage: (cursor?: string) => Promise<{ items: T[]; nextCursor?: string }>) {
@@ -177,9 +234,9 @@ function useInfiniteList<T>(key: unknown[], fetchPage: (cursor?: string) => Prom
   });
 }
 
-function useSessions() {
+function useSessions(archived: ArchivedFilter) {
   const route = useRoute();
-  const q = useInfiniteList(['sessions', route.source, route.project], (cursor) => api.sessions({ source: route.source, project: route.project, cursor }));
+  const q = useInfiniteList(['sessions', route.source, route.project, 'tree', archived], (cursor) => api.sessions({ source: route.source, project: route.project, cursor, tree: true, archived }));
   const items = useMemo(() => q.data?.pages.flatMap((p) => p.items) ?? [], [q.data]);
   const loadMore = useCallback(() => {
     if (q.hasNextPage && !q.isFetchingNextPage) void q.fetchNextPage();
@@ -215,16 +272,17 @@ function Note({ children }: { children: ReactNode }) {
 
 type TreeItem =
   | { t: 'group'; key: string; label: string; collapsed: boolean; count: number }
-  | { t: 'chat'; key: string; s: SessionMeta }
+  | ChatItem
   | { t: 'more'; key: string; group: string; hidden: number; expanded: boolean };
 
 const PER_GROUP = 5;
 
-function ProjectTree({ projectMap }: { projectMap: Map<string, ProjectMeta> }) {
+function ProjectTree({ projectMap, archived }: { projectMap: Map<string, ProjectMeta>; archived: ArchivedFilter }) {
   const route = useRoute();
-  const { q, items, loadMore } = useSessions();
+  const { q, items, loadMore } = useSessions(archived);
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+  const [closed, setClosed] = useState<Set<string>>(() => new Set());
 
   // Which source project keys make up each group (a folder used by two agents has two).
   const keysByGroup = useMemo(() => {
@@ -238,17 +296,17 @@ function ProjectTree({ projectMap }: { projectMap: Map<string, ProjectMeta> }) {
   // "Show more" fetches that project's whole list (one page is plenty).
   const extraKeys = [...expanded].filter((g) => g !== SCRATCH).flatMap((g) => [...(keysByGroup.get(g) ?? [])]);
   const extra = useQueries({
-    queries: extraKeys.map((k) => ({ queryKey: ['sessions', route.source, k, 'all'], queryFn: () => api.sessions({ source: route.source, project: k, limit: 200 }) })),
+    queries: extraKeys.map((k) => ({ queryKey: ['sessions', route.source, k, 'all', archived], queryFn: () => api.sessions({ source: route.source, project: k, limit: 200, tree: true, archived }) })),
   });
   const extraByGroup = useMemo(() => {
-    const m = new Map<string, SessionMeta[]>();
+    const m = new Map<string, SessionNode[]>();
     for (const r of extra) for (const s of r.data?.items ?? []) m.set(groupKey(s), [...(m.get(groupKey(s)) ?? []), s]);
-    for (const list of m.values()) list.sort((a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''));
+    for (const list of m.values()) list.sort((a, b) => (b.activityAt ?? b.updatedAt ?? '').localeCompare(a.activityAt ?? a.updatedAt ?? ''));
     return m;
   }, [extra]);
 
   const tree = useMemo(() => {
-    const groups = new Map<string, SessionMeta[]>();
+    const groups = new Map<string, SessionNode[]>();
     for (const s of items) {
       const k = groupKey(s);
       groups.set(k, [...(groups.get(k) ?? []), s]);
@@ -262,20 +320,21 @@ function ProjectTree({ projectMap }: { projectMap: Map<string, ProjectMeta> }) {
         all = [...list, ...more.filter((s) => !seen.has(s.id))];
       }
       const known = k === SCRATCH ? 0 : [...(keysByGroup.get(k) ?? [])].reduce((n, key) => n + (projectMap.get(key)?.sessionCount ?? 0), 0);
-      const total = Math.max(all.length, known);
+      // Counts are of top-level chats; the ones they started ride along.
+      const total = Math.max(all.length, known - all.reduce((n, r) => n + countTree(r) - 1, 0));
       const isCollapsed = collapsed.has(k);
       out.push({ t: 'group', key: `g:${k}`, label: labelFor(k, projectMap), collapsed: isCollapsed, count: total });
       if (isCollapsed) continue;
       const isExpanded = expanded.has(k);
       const shown = isExpanded ? all : all.slice(0, PER_GROUP);
       // Keep the open chat visible even if it's past the fold.
-      const active = !isExpanded ? all.find((s) => s.id === route.sessionId) : undefined;
+      const active = !isExpanded ? all.find((s) => contains(s, route.sessionId)) : undefined;
       if (active && !shown.includes(active)) shown.push(active);
-      for (const s of shown) out.push({ t: 'chat', key: s.id, s });
+      for (const s of shown) flatten(s, closed, route.sessionId, out as ChatItem[]);
       if (total > PER_GROUP) out.push({ t: 'more', key: `m:${k}`, group: k, hidden: total - shown.length, expanded: isExpanded });
     }
     return out;
-  }, [items, collapsed, expanded, extraByGroup, keysByGroup, projectMap, route.sessionId]);
+  }, [items, collapsed, expanded, closed, extraByGroup, keysByGroup, projectMap, route.sessionId]);
 
   const toggle = (set: Set<string>, k: string) => {
     const n = new Set(set);
@@ -319,33 +378,67 @@ function ProjectTree({ projectMap }: { projectMap: Map<string, ProjectMeta> }) {
               {i.expanded ? 'Show less' : i.hidden > 0 ? `Show ${i.hidden} more` : 'Show more'}
             </button>
           );
-        return <ChatRow s={i.s} active={i.s.id === route.sessionId} indent showAgent={!route.source} />;
+        return <ChatRow item={i} active={i.s.id === route.sessionId} indent showAgent={!route.source} open={!closed.has(i.s.id)} onToggle={() => setClosed((c) => toggle(c, i.s.id))} />;
       }}
     />
   );
 }
 
-function ChatRow({ s, active, indent, showAgent }: { s: SessionMeta; active: boolean; indent?: boolean; showAgent?: boolean }) {
+const STEP = 16;
+
+/** Tree connector for a nested chat: an elbow into this row, plus pass-through lines for open ancestors. */
+function Rails({ depth, last, rails }: { depth: number; last: boolean; rails: boolean[] }) {
+  if (depth === 0) return null;
   return (
-    <button
-      type="button"
-      onClick={() => navigate({ sessionId: s.id, seq: undefined })}
-      aria-current={active ? 'page' : undefined}
-      title={s.title || s.firstPrompt}
-      className={`group flex h-8 w-full items-center gap-2 rounded-lg pr-2 text-left text-[13.5px] transition-colors ${indent ? 'pl-[31px]' : 'pl-2.5'} ${
+    <span aria-hidden className="relative h-8 shrink-0" style={{ width: depth * STEP }}>
+      {rails.map((on, i) => (on ? <span key={i} className="absolute top-0 bottom-0 border-l border-line-strong" style={{ left: i * STEP + 6 }} /> : null))}
+      <span className={`absolute top-0 w-2 rounded-bl-[5px] border-b border-l border-line-strong ${last ? 'h-1/2' : 'h-1/2'}`} style={{ left: (depth - 1) * STEP + 6 }} />
+      {!last && <span className="absolute top-1/2 bottom-0 border-l border-line-strong" style={{ left: (depth - 1) * STEP + 6 }} />}
+    </span>
+  );
+}
+
+function ChatRow({ item, active, indent, showAgent, open, onToggle }: { item: ChatItem; active: boolean; indent?: boolean; showAgent?: boolean; open: boolean; onToggle?: () => void }) {
+  const { s, depth } = item;
+  const kids = s.children.length;
+  return (
+    <div
+      className={`group flex h-8 w-full items-center rounded-lg pr-1 text-[13.5px] transition-colors ${indent ? 'pl-[23px]' : 'pl-2'} ${
         active ? 'bg-press text-ink' : 'text-ink/80 hover:bg-hover hover:text-ink'
-      }`}
+      } ${s.archived ? 'opacity-60' : ''}`}
     >
-      <span className="min-w-0 flex-1 truncate">{s.title || s.firstPrompt || 'Untitled chat'}</span>
-      {showAgent && s.sourceId !== 'claude-code' && <span className="shrink-0 text-[11px] text-faint group-hover:hidden">{sourceLabel(s.sourceId)}</span>}
-      <span className="hidden shrink-0 text-[11.5px] text-faint tabular-nums group-hover:block">{relDate(s.updatedAt)}</span>
-    </button>
+      <Rails depth={depth} last={item.last} rails={item.rails} />
+      <button
+        type="button"
+        onClick={() => navigate({ sessionId: s.id, seq: undefined })}
+        aria-current={active ? 'page' : undefined}
+        title={[s.title || s.firstPrompt, s.spawnKind === 'side' ? 'Side chat' : depth > 0 ? 'Started from the chat above' : undefined, s.archived ? 'Archived' : undefined].filter(Boolean).join(' · ')}
+        className="flex h-full min-w-0 flex-1 items-center gap-2 pl-2 text-left outline-offset-[-2px]"
+      >
+        <span className="min-w-0 flex-1 truncate">{s.title || s.firstPrompt || 'Untitled chat'}</span>
+        {s.archived && <Archive size={12} className="shrink-0 text-faint" aria-label="Archived" />}
+        {showAgent && s.sourceId !== 'claude-code' && <span className="shrink-0 text-[11px] text-faint group-hover:hidden">{sourceLabel(s.sourceId)}</span>}
+        <span className="hidden shrink-0 text-[11.5px] text-faint tabular-nums group-hover:block">{relDate(s.updatedAt)}</span>
+      </button>
+      {kids > 0 && onToggle && (
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-expanded={open}
+          aria-label={open ? `Hide ${kids} started ${kids === 1 ? 'chat' : 'chats'}` : `Show ${kids} started ${kids === 1 ? 'chat' : 'chats'}`}
+          title={open ? 'Hide the chats this one started' : `Show ${kids} ${kids === 1 ? 'chat' : 'chats'} this one started`}
+          className="ml-0.5 flex size-6 shrink-0 items-center justify-center rounded-md text-faint hover:bg-press hover:text-ink"
+        >
+          {open ? <ChevronRight size={13} className="rotate-90 transition-transform" /> : <span className="text-[11px] tabular-nums">{kids}</span>}
+        </button>
+      )}
+    </div>
   );
 }
 
 /* ------------------------------------------------------------------ */
 
-type RecentItem = { t: 'head'; key: string; label: string } | { t: 'chat'; key: string; s: SessionMeta };
+type RecentItem = { t: 'head'; key: string; label: string } | ChatItem;
 
 function bucket(iso?: string): string {
   if (!iso) return 'Older';
@@ -360,20 +453,21 @@ function bucket(iso?: string): string {
   return d.getFullYear() === now.getFullYear() ? d.toLocaleString(undefined, { month: 'long' }) : String(d.getFullYear());
 }
 
-function RecentList({ projectMap }: { projectMap: Map<string, ProjectMeta> }) {
+function RecentList({ projectMap, archived }: { projectMap: Map<string, ProjectMeta>; archived: ArchivedFilter }) {
   const route = useRoute();
-  const { q, items, loadMore } = useSessions();
+  const { q, items, loadMore } = useSessions(archived);
   const list = useMemo(() => {
     const out: RecentItem[] = [];
     let last = '';
     for (const s of items) {
-      const b = bucket(s.updatedAt);
+      const b = bucket(s.activityAt ?? s.updatedAt);
       if (b !== last) out.push({ t: 'head', key: `h:${b}:${s.id}`, label: b });
       last = b;
-      out.push({ t: 'chat', key: s.id, s });
+      // Started chats follow their starter, always open here.
+      flatten(s, new Set(), route.sessionId, out as ChatItem[]);
     }
     return out;
-  }, [items]);
+  }, [items, route.sessionId]);
 
   if (q.isLoading) return <ListSkeleton />;
   if (q.isError) return <Note>{(q.error as Error).message}</Note>;
@@ -383,12 +477,14 @@ function RecentList({ projectMap }: { projectMap: Map<string, ProjectMeta> }) {
     <VirtualList
       label="Recent chats"
       items={list}
-      estimate={(i) => (i.t === 'head' ? 34 : 50)}
+      estimate={(i) => (i.t === 'head' ? 34 : i.depth > 0 ? 32 : 50)}
       getKey={(i) => i.key}
       onEnd={loadMore}
       render={(i) =>
         i.t === 'head' ? (
           <div className="px-2.5 pt-4 pb-1.5 text-[11.5px] font-medium text-faint">{i.label}</div>
+        ) : i.depth > 0 ? (
+          <ChatRow item={i} active={i.s.id === route.sessionId} showAgent={!route.source} open />
         ) : (
           <button
             type="button"
@@ -398,7 +494,7 @@ function RecentList({ projectMap }: { projectMap: Map<string, ProjectMeta> }) {
           >
             <div className="truncate text-[13.5px] text-ink/90">{i.s.title || i.s.firstPrompt || 'Untitled chat'}</div>
             <div className="mt-0.5 flex items-center gap-1.5 text-[11.5px] text-faint">
-              <span className="min-w-0 truncate">{isScratch(i.s) ? 'Scratch chat' : labelFor(groupKey(i.s), projectMap)}</span>
+              <span className="min-w-0 truncate">{labelFor(groupKey(i.s), projectMap)}</span>
               <span>·</span>
               <span className="shrink-0">{relDate(i.s.updatedAt)}</span>
               {!route.source && i.s.sourceId !== 'claude-code' && (
