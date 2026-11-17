@@ -46,10 +46,10 @@ export function Minimap({ sessionId, current, onJump }: { sessionId: string; cur
       </ol>
       {h && (
         <div
-          className="animate-pop pointer-events-none absolute right-full z-20 mr-3 w-72 -translate-y-1/2 rounded-xl border border-line bg-canvas px-3 py-2.5 text-[13px] shadow-pop dark:bg-raised"
+          className="animate-pop pointer-events-none absolute right-full z-20 mr-3 w-72 -translate-y-1/2 rounded-xl border border-line bg-canvas px-3 py-2.5 text-[12.5px] shadow-pop dark:bg-raised"
           style={{ top: `${pos(hover!) * 100}%` }}
         >
-          <div className="mb-1 text-[11px] text-faint tabular-nums">
+          <div className="mb-1 text-[10.5px] text-faint tabular-nums">
             Prompt {hover! + 1} of {n}
             {h.timestamp ? ` · ${time(h.timestamp)}` : ''}
           </div>

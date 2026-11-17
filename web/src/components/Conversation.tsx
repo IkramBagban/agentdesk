@@ -205,7 +205,7 @@ export function Conversation({ sessionId, view, seq, embedded = false }: { sessi
         <div style={{ height: v.getTotalSize(), position: 'relative' }}>
           {inheritedNote && (
             <div className="absolute top-0 left-0 w-full">
-              <div className="mx-auto flex max-w-[760px] items-center gap-3 px-5 pt-5 text-[12px] text-faint sm:px-8 md:px-10">
+              <div className="mx-auto flex max-w-[760px] items-center gap-3 px-5 pt-5 text-[11.5px] text-faint sm:px-8 md:px-10">
                 <span className="h-px flex-1 bg-line" />
                 <button type="button" onClick={() => setShowInherited(true)} className="rounded-md px-2 py-1 transition-colors hover:bg-hover hover:text-ink">
                   Started from another chat · show the earlier messages
@@ -218,7 +218,7 @@ export function Conversation({ sessionId, view, seq, embedded = false }: { sessi
             const row = rows[it.index]!;
             return (
               <div key={it.key} data-index={it.index} ref={v.measureElement} className="absolute top-0 left-0 w-full" style={{ transform: `translateY(${it.start}px)` }}>
-                <div className={embedded ? 'px-4 sm:px-5' : 'mx-auto max-w-[760px] px-5 sm:px-8 md:px-10'}>
+                <div className={embedded ? 'mx-auto max-w-[760px] px-4 sm:px-5' : 'mx-auto max-w-[760px] px-5 sm:px-8 md:px-10'}>
                   <RowView row={row} ctxBase={ctxBase} fromAgent={fromAgent} showInjected={view === 'all'} highlight={seq != null && rowSeqs(row).includes(seq)} />
                 </div>
               </div>
@@ -277,8 +277,8 @@ function Empty({ title, body }: { title: string; body?: string }) {
   return (
     <div className="flex h-full items-center justify-center p-10">
       <div className="max-w-sm text-center">
-        <p className="text-[15px] font-medium">{title}</p>
-        {body && <p className="mt-1.5 text-[13.5px] text-muted">{body}</p>}
+        <p className="text-[14px] font-medium">{title}</p>
+        {body && <p className="mt-1.5 text-[13px] text-muted">{body}</p>}
       </div>
     </div>
   );
@@ -291,7 +291,7 @@ const RowView = memo(function RowView({ row, ctxBase, highlight, showInjected, f
     case 'date':
       return (
         <div className="flex justify-center pt-7 pb-3">
-          <span className="text-[12px] font-medium text-faint tabular-nums" title={fullDate(row.timestamp)}>
+          <span className="text-[11.5px] font-medium text-faint tabular-nums" title={fullDate(row.timestamp)}>
             {separatorDate(row.timestamp)}
           </span>
         </div>
@@ -303,7 +303,7 @@ const RowView = memo(function RowView({ row, ctxBase, highlight, showInjected, f
     case 'divider': {
       const text = row.event.blocks.map((b) => (b.type === 'notice' ? b.text : '')).join(' ');
       return (
-        <div className="flex items-center gap-3 py-5 text-[12px] text-faint">
+        <div className="flex items-center gap-3 py-5 text-[11.5px] text-faint">
           <span className="h-px flex-1 bg-line" />
           <span className={`max-w-[75%] truncate ${highlight ? 'text-ink' : ''}`} title={text}>
             {text}
@@ -356,7 +356,7 @@ function PastedText({ text, truncated }: { text: string; truncated?: { fullLengt
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
-        className="inline-flex max-w-full items-center gap-2 rounded-xl bg-canvas/70 px-2.5 py-1.5 text-left text-[12.5px] ring-1 ring-line transition-colors hover:ring-line-strong dark:bg-black/15"
+        className="inline-flex max-w-full items-center gap-2 rounded-xl bg-canvas/70 px-2.5 py-1.5 text-left text-[12px] ring-1 ring-line transition-colors hover:ring-line-strong dark:bg-black/15"
       >
         <ClipboardPaste size={14} className="shrink-0 text-muted" />
         <span className="font-medium">Pasted text</span>
@@ -364,9 +364,9 @@ function PastedText({ text, truncated }: { text: string; truncated?: { fullLengt
         <ChevronRight size={13} className={`shrink-0 text-faint transition-transform ${open ? 'rotate-90' : ''}`} />
       </button>
       {open && (
-        <div className="scroll-quiet mt-2 max-h-[28rem] overflow-y-auto rounded-xl bg-canvas/70 px-3.5 py-3 ring-1 ring-line dark:bg-black/15 [&_.prose-msg]:text-[13.5px]">
+        <div className="scroll-quiet mt-2 max-h-[28rem] overflow-y-auto rounded-xl bg-canvas/70 px-3.5 py-3 ring-1 ring-line dark:bg-black/15 [&_.prose-msg]:text-[13px]">
           <Markdown text={text} />
-          {truncated && <p className="mt-2 text-[12.5px] text-faint">Showing the first part. Export the chat to read the whole paste.</p>}
+          {truncated && <p className="mt-2 text-[12px] text-faint">Showing the first part. Export the chat to read the whole paste.</p>}
         </div>
       )}
     </div>
@@ -383,7 +383,7 @@ function TypedText({ text }: { text: string }) {
     <div>
       <div className={`whitespace-pre-wrap ${long && !open ? 'fade-bottom max-h-[300px] overflow-hidden' : ''}`}>{text}</div>
       {long && (
-        <button type="button" onClick={() => setOpen((o) => !o)} className="mt-1 text-[13px] font-medium text-muted hover:text-ink">
+        <button type="button" onClick={() => setOpen((o) => !o)} className="mt-1 text-[12.5px] font-medium text-muted hover:text-ink">
           {open ? 'Show less' : 'Show more'}
         </button>
       )}
@@ -393,7 +393,7 @@ function TypedText({ text }: { text: string }) {
 
 function FullPrompt({ ctx }: { ctx: BlockCtx }) {
   const q = useQuery({ queryKey: ['event', ctx.sessionId, ctx.seq], queryFn: () => api.event(ctx.sessionId, ctx.seq) });
-  if (!q.data) return <span className="text-[13px] text-faint">Loading…</span>;
+  if (!q.data) return <span className="text-[12.5px] text-faint">Loading…</span>;
   return <PromptText blocks={q.data.blocks} />;
 }
 
@@ -408,7 +408,7 @@ function PromptText({ blocks, ctx }: { blocks: Block[]; ctx?: BlockCtx }) {
           <div key={i} className="space-y-1">
             {splitPasted(b.text).map((part, j) => (part.kind === 'pasted' ? <PastedText key={j} text={part.text} truncated={b.truncated} /> : <TypedText key={j} text={part.text} />))}
             {b.truncated && !b.text.includes('<pasted_content') && ctx && (
-              <button type="button" onClick={() => setFull(true)} className="text-[13px] font-medium text-muted hover:text-ink">
+              <button type="button" onClick={() => setFull(true)} className="text-[12.5px] font-medium text-muted hover:text-ink">
                 Show the full text ({bytes(b.truncated.fullLength)})
               </button>
             )}
@@ -434,14 +434,14 @@ function Prompt({ event, ctx, highlight, showInjected, fromAgent }: { event: Cha
   return (
     <div id={`seq-${event.seq}`} className={`group/msg flex flex-col items-end pt-4 pb-1 ${event.offBranch ? 'opacity-55' : ''} ${highlightCls(highlight)}`}>
       {event.offBranch && <OffBranch />}
-      {fromAgent && <div className="mb-1.5 text-[11.5px] font-medium text-faint">Instructions from the main agent</div>}
+      {fromAgent && <div className="mb-1.5 text-[11px] font-medium text-faint">Instructions from the main agent</div>}
       {images.length > 0 && (
         <div className="mb-2 flex max-w-[85%] flex-wrap justify-end gap-2">
           {images.map((b, i) => (b.type === 'image' ? <ImageView key={i} block={b} ctx={ctx} small /> : <BlockView key={i} block={b} ctx={ctx} />))}
         </div>
       )}
       {hasText && (
-        <div className="max-w-[min(85%,620px)] min-w-0 rounded-[20px] bg-raised px-4 py-2.5 text-[15px] leading-[1.6] text-ink [overflow-wrap:anywhere]">
+        <div className="max-w-[min(85%,620px)] min-w-0 rounded-[20px] bg-raised px-4 py-2.5 text-[14px] leading-[1.6] text-ink [overflow-wrap:anywhere]">
           <PromptText blocks={event.blocks} ctx={ctx} />
         </div>
       )}
@@ -455,12 +455,12 @@ function Prompt({ event, ctx, highlight, showInjected, fromAgent }: { event: Cha
       {showInjected &&
         injected.map((b, i) => (
           <div key={i} className="mt-2 w-full max-w-[85%]">
-            <Disclosure summary={<span className="text-[12.5px]">Context the app added to this message</span>}>
+            <Disclosure summary={<span className="text-[12px]">Context the app added to this message</span>}>
               {() => <pre className="code-block max-h-80 overflow-auto whitespace-pre-wrap">{b.type === 'notice' ? b.text : ''}</pre>}
             </Disclosure>
           </div>
         ))}
-      <div className="reveal mt-1 flex h-7 items-center gap-0.5 text-[11.5px] text-faint">
+      <div className="reveal mt-1 flex h-7 items-center gap-0.5 text-[11px] text-faint">
         <span className="px-1 tabular-nums" title={fullDate(event.timestamp)}>
           {time(event.timestamp)}
         </span>
@@ -472,7 +472,7 @@ function Prompt({ event, ctx, highlight, showInjected, fromAgent }: { event: Cha
 
 function OffBranch() {
   return (
-    <div className="mb-1.5 inline-flex items-center gap-1 text-[11.5px] text-faint">
+    <div className="mb-1.5 inline-flex items-center gap-1 text-[11px] text-faint">
       <GitBranch size={12} /> Earlier version, replaced by an edit or retry
     </div>
   );
@@ -494,7 +494,7 @@ function Reply({ event, ctx, highlight, endOfTurn }: { event: ChatEvent; ctx: Bl
         ))}
       </div>
       {endOfTurn && (
-        <div className="reveal mt-1.5 -ml-1.5 flex h-7 items-center gap-0.5 text-[11.5px] text-faint">
+        <div className="reveal mt-1.5 -ml-1.5 flex h-7 items-center gap-0.5 text-[11px] text-faint">
           {text && <CopyButton text={text} label="Copy reply" />}
           <span className="px-1 tabular-nums" title={fullDate(event.timestamp)}>
             {time(event.timestamp)}
@@ -525,12 +525,12 @@ function Activity({ row, ctxBase, defaultOpen }: { row: Extract<Row, { kind: 'ac
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
-        className={`group -mx-2 flex max-w-[calc(100%+16px)] min-w-0 items-center gap-2 rounded-lg px-2 py-1 text-left text-[13.5px] transition-colors hover:bg-hover ${onlyMeta ? 'text-faint' : 'text-muted'} hover:text-ink`}
+        className={`group -mx-2 flex max-w-[calc(100%+16px)] min-w-0 items-center gap-2 rounded-lg px-2 py-1 text-left text-[13px] transition-colors hover:bg-hover ${onlyMeta ? 'text-faint' : 'text-muted'} hover:text-ink`}
       >
         <Icon size={14} className="shrink-0 opacity-80" strokeWidth={1.9} />
         <span className="min-w-0 truncate">{sentence(s.phrases)}</span>
         {(s.added > 0 || s.removed > 0) && (
-          <span className="shrink-0 font-mono text-[12px] tabular-nums">
+          <span className="shrink-0 font-mono text-[11.5px] tabular-nums">
             {s.added > 0 && <span className="text-ok">+{s.added}</span>}
             {s.added > 0 && s.removed > 0 && ' '}
             {s.removed > 0 && <span className="text-error">−{s.removed}</span>}
@@ -554,7 +554,7 @@ function Activity({ row, ctxBase, defaultOpen }: { row: Extract<Row, { kind: 'ac
                 const padded = b.type !== 'tool_use' && b.type !== 'thinking' && b.type !== 'tool_result';
                 return (
                   <div key={`${e.seq}-${i}`} className={`border-b border-line last:border-b-0 ${e.visibility === 'meta' ? 'bg-hover/50' : ''}`}>
-                    <div className={padded ? 'px-3 py-2.5 [&_.prose-msg]:text-[13.5px]' : ''}>
+                    <div className={padded ? 'px-3 py-2.5 [&_.prose-msg]:text-[13px]' : ''}>
                       <BlockView block={b} ctx={{ ...ctxBase, seq: e.seq, results: row.results }} />
                     </div>
                   </div>

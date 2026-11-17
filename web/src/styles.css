@@ -92,7 +92,7 @@ body {
   background: var(--canvas);
   color: var(--ink);
   font-family: var(--font-sans);
-  font-size: 14px;
+  font-size: 13px;
   line-height: 1.45;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -122,7 +122,7 @@ button {
 
 kbd {
   font-family: var(--font-sans);
-  font-size: 11px;
+  font-size: 10.5px;
   min-width: 1.5em;
   display: inline-block;
   text-align: center;
@@ -136,8 +136,8 @@ kbd {
 @layer components {
   /* Long-form message text */
   .prose-msg {
-    font-size: 15px;
-    line-height: 1.68;
+    font-size: 14px;
+    line-height: 1.65;
     overflow-wrap: anywhere;
     color: var(--ink);
   }
@@ -185,7 +185,7 @@ kbd {
     padding: 0.12em 0.36em;
   }
   .prose-msg table {
-    font-size: 13.5px;
+    font-size: 12.5px;
     border-collapse: collapse;
     display: block;
     overflow-x: auto;
@@ -204,7 +204,7 @@ kbd {
   /* Code: a quiet sunken panel */
   .code-block {
     font-family: var(--font-mono);
-    font-size: 12.5px;
+    font-size: 12px;
     line-height: 1.6;
     background: var(--code-bg);
     border: 1px solid var(--line);

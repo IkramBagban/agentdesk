@@ -87,8 +87,8 @@ export function Sidebar({ status, theme, onTheme, onClose }: { status?: Status; 
 
   return (
     <aside className="flex h-full min-h-0 flex-col bg-side lg:border-r lg:border-line">
-      <div className="flex h-[52px] shrink-0 items-center gap-2 pr-2 pl-4">
-        <button type="button" onClick={() => navigate({ sessionId: undefined, seq: undefined, q: undefined })} className="flex min-w-0 items-center gap-2 rounded-md text-[14px] font-semibold tracking-[-0.01em]">
+      <div className="flex h-12 shrink-0 items-center gap-2 pr-2 pl-4">
+        <button type="button" onClick={() => navigate({ sessionId: undefined, seq: undefined, q: undefined })} className="flex min-w-0 items-center gap-2 rounded-md text-[13px] font-semibold tracking-[-0.01em]">
           <Logo />
           agentdesk
         </button>
@@ -107,7 +107,7 @@ export function Sidebar({ status, theme, onTheme, onClose }: { status?: Status; 
             onChange={(e) => setText(e.target.value)}
             placeholder="Search every message"
             aria-label="Search every message"
-            className="min-w-0 flex-1 bg-transparent text-[13.5px] outline-none placeholder:text-faint"
+            className="min-w-0 flex-1 bg-transparent text-[13px] outline-none placeholder:text-faint"
             onKeyDown={(e) => e.key === 'Escape' && (setText(''), e.currentTarget.blur())}
           />
           {text ? (
@@ -131,7 +131,7 @@ export function Sidebar({ status, theme, onTheme, onClose }: { status?: Status; 
 
       {!route.q && (
         <div className="flex items-center gap-1 px-3 pt-1 pb-1" role="tablist" aria-label="Group chats">
-          <span className="mr-auto px-2 text-[11.5px] font-medium tracking-wide text-faint uppercase">Chats</span>
+          <span className="mr-auto px-2 text-[11px] font-medium tracking-wide text-faint uppercase">Chats</span>
           {(['projects', 'recent'] as const).map((m) => (
             <button
               key={m}
@@ -139,7 +139,7 @@ export function Sidebar({ status, theme, onTheme, onClose }: { status?: Status; 
               role="tab"
               aria-selected={mode === m}
               onClick={() => setMode(m)}
-              className={`rounded-md px-2 py-1 text-[12.5px] font-medium transition-colors ${mode === m ? 'bg-hover text-ink' : 'text-faint hover:text-muted'}`}
+              className={`rounded-md px-2 py-1 text-[12px] font-medium transition-colors ${mode === m ? 'bg-hover text-ink' : 'text-faint hover:text-muted'}`}
             >
               {m === 'projects' ? 'Projects' : 'Recent'}
             </button>
@@ -158,7 +158,7 @@ export function Sidebar({ status, theme, onTheme, onClose }: { status?: Status; 
       )}
 
       {filtered && !route.q && (
-        <div className="mx-3 mb-1 flex items-center gap-2 rounded-lg bg-accent-soft px-2.5 py-1.5 text-[12.5px] text-accent">
+        <div className="mx-3 mb-1 flex items-center gap-2 rounded-lg bg-accent-soft px-2.5 py-1.5 text-[12px] text-accent">
           <FolderOpen size={14} className="shrink-0" />
           <span className="min-w-0 flex-1 truncate">{labelFor(filtered.key, projectMap)}</span>
           <button type="button" aria-label="Show all projects" onClick={() => navigate({ project: undefined }, { replace: true })} className="rounded p-0.5 hover:bg-accent-soft">
@@ -271,7 +271,7 @@ function VirtualList<T>({ items, render, onEnd, estimate, getKey, label }: { ite
 }
 
 function Note({ children }: { children: ReactNode }) {
-  return <p className="px-5 py-4 text-[13px] leading-relaxed text-muted">{children}</p>;
+  return <p className="px-5 py-4 text-[12.5px] leading-relaxed text-muted">{children}</p>;
 }
 
 /* ------------------------------------------------------------------ */
@@ -368,19 +368,19 @@ function ProjectTree({ projectMap, archived }: { projectMap: Map<string, Project
               type="button"
               onClick={() => setCollapsed((c) => toggle(c, k))}
               aria-expanded={!i.collapsed}
-              className="group mt-2 flex h-8 w-full items-center gap-2 rounded-lg px-2 text-left text-[13.5px] text-ink/90 hover:bg-hover"
+              className="group mt-2 flex h-8 w-full items-center gap-2 rounded-lg px-2 text-left text-[13px] text-ink/90 hover:bg-hover"
               title={k === SCRATCH ? 'Chats run in temporary scratch folders' : k.startsWith('path:') ? k.slice(5) : (projectMap.get(k)?.path ?? k)}
             >
               {i.collapsed ? <Folder size={15} className="shrink-0 text-muted" strokeWidth={1.75} /> : <FolderOpen size={15} className="shrink-0 text-muted" strokeWidth={1.75} />}
               <span className="min-w-0 flex-1 truncate font-medium">{i.label}</span>
-              <span className="text-[11.5px] text-faint tabular-nums opacity-0 transition-opacity group-hover:opacity-100">{i.count}</span>
+              <span className="text-[11px] text-faint tabular-nums opacity-0 transition-opacity group-hover:opacity-100">{i.count}</span>
               <ChevronRight size={14} className={`shrink-0 text-faint transition-transform ${i.collapsed ? '' : 'rotate-90'}`} />
             </button>
           );
         }
         if (i.t === 'more')
           return (
-            <button type="button" onClick={() => setExpanded((e) => toggle(e, i.group))} className="flex h-8 w-full items-center rounded-lg pl-[31px] text-left text-[12.5px] text-faint hover:bg-hover hover:text-muted">
+            <button type="button" onClick={() => setExpanded((e) => toggle(e, i.group))} className="flex h-8 w-full items-center rounded-lg pl-[31px] text-left text-[12px] text-faint hover:bg-hover hover:text-muted">
               {i.expanded ? 'Show less' : i.hidden > 0 ? `Show ${i.hidden} more` : 'Show more'}
             </button>
           );
@@ -409,7 +409,7 @@ function ChatRow({ item, active, indent, showAgent, open, onToggle }: { item: Ch
   const kids = s.children.length;
   return (
     <div
-      className={`group flex h-8 w-full items-center rounded-lg pr-1 text-[13.5px] transition-colors ${indent ? 'pl-[23px]' : 'pl-2'} ${
+      className={`group flex h-8 w-full items-center rounded-lg pr-1 text-[13px] transition-colors ${indent ? 'pl-[23px]' : 'pl-2'} ${
         active ? 'bg-press text-ink' : 'text-ink/80 hover:bg-hover hover:text-ink'
       } ${s.archived ? 'opacity-60' : ''}`}
     >
@@ -423,8 +423,8 @@ function ChatRow({ item, active, indent, showAgent, open, onToggle }: { item: Ch
       >
         <span className="min-w-0 flex-1 truncate">{s.title || s.firstPrompt || 'Untitled chat'}</span>
         {s.archived && <Archive size={12} className="shrink-0 text-faint" aria-label="Archived" />}
-        {showAgent && s.sourceId !== 'claude-code' && <span className="shrink-0 text-[11px] text-faint group-hover:hidden">{sourceLabel(s.sourceId)}</span>}
-        <span className="hidden shrink-0 text-[11.5px] text-faint tabular-nums group-hover:block">{relDate(s.updatedAt)}</span>
+        {showAgent && s.sourceId !== 'claude-code' && <span className="shrink-0 text-[10.5px] text-faint group-hover:hidden">{sourceLabel(s.sourceId)}</span>}
+        <span className="hidden shrink-0 text-[11px] text-faint tabular-nums group-hover:block">{relDate(s.updatedAt)}</span>
       </button>
       {kids > 0 && onToggle && (
         <button
@@ -435,7 +435,7 @@ function ChatRow({ item, active, indent, showAgent, open, onToggle }: { item: Ch
           title={open ? 'Hide the chats this one started' : `Show ${kids} ${kids === 1 ? 'chat' : 'chats'} this one started`}
           className="ml-0.5 flex size-6 shrink-0 items-center justify-center rounded-md text-faint hover:bg-press hover:text-ink"
         >
-          {open ? <ChevronRight size={13} className="rotate-90 transition-transform" /> : <span className="text-[11px] tabular-nums">{kids}</span>}
+          {open ? <ChevronRight size={13} className="rotate-90 transition-transform" /> : <span className="text-[10.5px] tabular-nums">{kids}</span>}
         </button>
       )}
     </div>
@@ -488,7 +488,7 @@ function RecentList({ projectMap, archived }: { projectMap: Map<string, ProjectM
       onEnd={loadMore}
       render={(i) =>
         i.t === 'head' ? (
-          <div className="px-2.5 pt-4 pb-1.5 text-[11.5px] font-medium text-faint">{i.label}</div>
+          <div className="px-2.5 pt-4 pb-1.5 text-[11px] font-medium text-faint">{i.label}</div>
         ) : i.depth > 0 ? (
           <ChatRow item={i} active={i.s.id === route.sessionId} showAgent={!route.source} open />
         ) : (
@@ -498,8 +498,8 @@ function RecentList({ projectMap, archived }: { projectMap: Map<string, ProjectM
             aria-current={i.s.id === route.sessionId ? 'page' : undefined}
             className={`block w-full rounded-lg px-2.5 py-1.5 text-left transition-colors ${i.s.id === route.sessionId ? 'bg-press' : 'hover:bg-hover'}`}
           >
-            <div className="truncate text-[13.5px] text-ink/90">{i.s.title || i.s.firstPrompt || 'Untitled chat'}</div>
-            <div className="mt-0.5 flex items-center gap-1.5 text-[11.5px] text-faint">
+            <div className="truncate text-[13px] text-ink/90">{i.s.title || i.s.firstPrompt || 'Untitled chat'}</div>
+            <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-faint">
               <span className="min-w-0 truncate">{labelFor(groupKey(i.s), projectMap)}</span>
               <span>·</span>
               <span className="shrink-0">{relDate(i.s.updatedAt)}</span>
@@ -538,7 +538,7 @@ function SearchResults({ q: text, projectMap }: { q: string; projectMap: Map<str
     );
   return (
     <>
-      <div className="px-5 pt-1 pb-1 text-[11.5px] font-medium text-faint">{q.hasNextPage ? `${items.length}+ matches` : `${items.length} ${items.length === 1 ? 'match' : 'matches'}`}</div>
+      <div className="px-5 pt-1 pb-1 text-[11px] font-medium text-faint">{q.hasNextPage ? `${items.length}+ matches` : `${items.length} ${items.length === 1 ? 'match' : 'matches'}`}</div>
       <VirtualList
         label="Search results"
         items={items}
@@ -556,12 +556,12 @@ function Hit({ h, active, project }: { h: SearchHit; active: boolean; project: s
   return (
     <button type="button" onClick={() => navigate({ sessionId: h.sessionId, seq: h.seq })} className={`block w-full rounded-lg px-2.5 py-2 text-left transition-colors ${active ? 'bg-press' : 'hover:bg-hover'}`}>
       <div className="flex items-baseline gap-2">
-        <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-ink/90">{h.sessionTitle || 'Untitled chat'}</span>
-        <span className="shrink-0 text-[11.5px] text-faint">{relDate(h.timestamp)}</span>
+        <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium text-ink/90">{h.sessionTitle || 'Untitled chat'}</span>
+        <span className="shrink-0 text-[11px] text-faint">{relDate(h.timestamp)}</span>
       </div>
       {/* The server escapes everything except <mark>. */}
-      <p className="mt-0.5 line-clamp-2 text-[12.5px] leading-snug text-muted" dangerouslySetInnerHTML={{ __html: h.snippet }} />
-      <div className="mt-1 truncate text-[11px] text-faint">
+      <p className="mt-0.5 line-clamp-2 text-[12px] leading-snug text-muted" dangerouslySetInnerHTML={{ __html: h.snippet }} />
+      <div className="mt-1 truncate text-[10.5px] text-faint">
         {who} · {project}
       </div>
     </button>
@@ -590,7 +590,7 @@ function Footer({ status, theme, onTheme }: { status?: Status; theme: ThemePref;
     <div className="shrink-0 border-t border-line px-3 py-2.5" aria-live="polite">
       {indexing && (
         <div className="mb-2 px-1">
-          <div className="mb-1.5 flex justify-between text-[11.5px] text-muted">
+          <div className="mb-1.5 flex justify-between text-[11px] text-muted">
             <span>Indexing chats…</span>
             <span className="tabular-nums">
               {index.filesDone} / {index.filesTotal}
@@ -602,7 +602,7 @@ function Footer({ status, theme, onTheme }: { status?: Status; theme: ThemePref;
         </div>
       )}
       <div className="flex items-center gap-2">
-        <span className="min-w-0 flex-1 truncate px-1 text-[11.5px] text-faint" title="Read from local files; nothing leaves this computer">
+        <span className="min-w-0 flex-1 truncate px-1 text-[11px] text-faint" title="Read from local files; nothing leaves this computer">
           {index ? `${index.sessionCount.toLocaleString()} chats · on this computer` : ''}
         </span>
         <div role="radiogroup" aria-label="Theme" className="flex rounded-lg bg-hover p-0.5">
@@ -629,7 +629,7 @@ function Footer({ status, theme, onTheme }: { status?: Status; theme: ThemePref;
         </div>
       </div>
       {index?.lastError && (
-        <div className="mt-1.5 truncate px-1 text-[11.5px] text-error" title={index.lastError}>
+        <div className="mt-1.5 truncate px-1 text-[11px] text-error" title={index.lastError}>
           {index.lastError}
         </div>
       )}

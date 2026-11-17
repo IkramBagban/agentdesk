@@ -50,7 +50,7 @@ export function Disclosure({ summary, children, defaultOpen = false, tone = 'def
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
-        className={`group inline-flex max-w-full min-w-0 items-center gap-1.5 rounded-md py-0.5 text-left text-[13.5px] transition-colors ${tone === 'error' ? 'text-error' : 'text-muted hover:text-ink'}`}
+        className={`group inline-flex max-w-full min-w-0 items-center gap-1.5 rounded-md py-0.5 text-left text-[13px] transition-colors ${tone === 'error' ? 'text-error' : 'text-muted hover:text-ink'}`}
       >
         {icon}
         <span className="min-w-0 truncate">{summary}</span>
@@ -72,7 +72,7 @@ function FullText({ ctx, full }: { ctx: BlockCtx; full: number }) {
       .join('\n\n');
     return <Markdown text={text} />;
   }
-  return <p className="text-[13px] text-faint">{q.isError ? (q.error as Error).message : `Loading ${bytes(full)}…`}</p>;
+  return <p className="text-[12.5px] text-faint">{q.isError ? (q.error as Error).message : `Loading ${bytes(full)}…`}</p>;
 }
 
 export function TextView({ text, truncated, ctx }: { text: string; truncated?: { fullLength: number }; ctx: BlockCtx }) {
@@ -82,7 +82,7 @@ export function TextView({ text, truncated, ctx }: { text: string; truncated?: {
     <>
       <Markdown text={text} />
       {truncated && (
-        <button type="button" onClick={() => setShowAll(true)} className="mt-2 text-[13px] font-medium text-accent hover:underline">
+        <button type="button" onClick={() => setShowAll(true)} className="mt-2 text-[12.5px] font-medium text-accent hover:underline">
           Show the full text ({bytes(truncated.fullLength)})
         </button>
       )}
@@ -99,7 +99,7 @@ export function ImageView({ block, ctx, small = false }: { block: ImageBlock; ct
   const h = small ? 'h-28' : 'h-56';
   if (!src || failed)
     return (
-      <div className={`flex ${h} w-40 flex-col items-center justify-center gap-1.5 rounded-xl bg-raised text-[12px] text-faint`}>
+      <div className={`flex ${h} w-40 flex-col items-center justify-center gap-1.5 rounded-xl bg-raised text-[11.5px] text-faint`}>
         <ImageOff size={18} />
         {block.filePath ? 'Image file missing' : 'Image unavailable'}
       </div>
@@ -128,7 +128,7 @@ function FileRefView({ block }: { block: Extract<Block, { type: 'file_ref' }> })
   const q = useQuery({ queryKey: ['file', block.path], queryFn: () => api.file(block.path), enabled: open });
   const label = block.label ?? basename(block.path);
   return (
-    <div className="text-[13px]">
+    <div className="text-[12.5px]">
       <span className="inline-flex max-w-full items-center gap-1.5 rounded-lg bg-raised px-2 py-1 text-muted" title={block.path}>
         <FileText size={13} className="shrink-0" />
         <span className="truncate">{label}</span>
@@ -177,10 +177,10 @@ function Output({ text, error, prompt }: { text: string; error?: boolean; prompt
       {text ? (
         <pre className={`max-h-[30rem] overflow-auto px-3.5 py-2.5 pr-10 whitespace-pre-wrap ${error ? 'text-error' : 'text-muted'}`}>{shown}</pre>
       ) : (
-        <div className="px-3.5 py-2 font-sans text-[12px] text-faint">No output</div>
+        <div className="px-3.5 py-2 font-sans text-[11.5px] text-faint">No output</div>
       )}
       {long && (
-        <button type="button" onClick={() => setAll((a) => !a)} className="w-full border-t border-line px-3.5 py-1.5 text-left font-sans text-[12px] font-medium text-muted hover:text-ink">
+        <button type="button" onClick={() => setAll((a) => !a)} className="w-full border-t border-line px-3.5 py-1.5 text-left font-sans text-[11.5px] font-medium text-muted hover:text-ink">
           {all ? 'Show less' : `Show all ${lines.length.toLocaleString()} lines`}
         </button>
       )}
@@ -232,7 +232,7 @@ export function kindIcon(name: string): LucideIcon {
 
 function Stats({ added, removed }: { added: number; removed: number }) {
   return (
-    <span className="shrink-0 font-mono text-[11.5px] tabular-nums">
+    <span className="shrink-0 font-mono text-[11px] tabular-nums">
       {added > 0 && <span className="text-ok">+{added}</span>}
       {added > 0 && removed > 0 && ' '}
       {removed > 0 && <span className="text-error">−{removed}</span>}
@@ -254,7 +254,7 @@ export function CallRow({ block, ctx }: { block: ToolUseBlock; ctx: BlockCtx }) 
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
-        className="group flex min-h-9 w-full min-w-0 items-center gap-2.5 px-3 py-1.5 text-left text-[13px] transition-colors hover:bg-hover"
+        className="group flex min-h-9 w-full min-w-0 items-center gap-2.5 px-3 py-1.5 text-left text-[12.5px] transition-colors hover:bg-hover"
         title={block.name}
       >
         <Icon size={14} className={`shrink-0 ${failed ? 'text-error' : 'text-faint'}`} strokeWidth={1.9} />
@@ -264,14 +264,14 @@ export function CallRow({ block, ctx }: { block: ToolUseBlock; ctx: BlockCtx }) 
           ) : (
             <>
               <span className="shrink-0 text-muted">{d.verb}</span>
-              {d.target && <span className={`truncate text-ink/90 ${d.mono ? 'font-mono text-[12px]' : ''}`}>{d.target}</span>}
-              {d.title && <span className="shrink-0 truncate text-[12px] text-faint">· {d.title}</span>}
+              {d.target && <span className={`truncate text-ink/90 ${d.mono ? 'font-mono text-[11.5px]' : ''}`}>{d.target}</span>}
+              {d.title && <span className="shrink-0 truncate text-[11.5px] text-faint">· {d.title}</span>}
             </>
           )}
         </span>
         {st && <Stats {...st} />}
-        {failed && <span className="shrink-0 rounded-md bg-error-soft px-1.5 py-px text-[11px] font-medium text-error">Failed</span>}
-        {!result && ctx.results && <span className="shrink-0 text-[11px] text-faint">no result</span>}
+        {failed && <span className="shrink-0 rounded-md bg-error-soft px-1.5 py-px text-[10.5px] font-medium text-error">Failed</span>}
+        {!result && ctx.results && <span className="shrink-0 text-[10.5px] text-faint">no result</span>}
         <ChevronRight size={14} className={`shrink-0 text-faint transition-transform ${open ? 'rotate-90' : ''}`} />
       </button>
       {open && (
@@ -315,7 +315,7 @@ function patchLines(patch: string) {
 function PathLine({ path }: { path?: string }) {
   if (!path) return null;
   return (
-    <div className="flex min-w-0 items-center gap-1 text-[12px] text-faint" title={path}>
+    <div className="flex min-w-0 items-center gap-1 text-[11.5px] text-faint" title={path}>
       <span className="truncate font-mono">{tildify(path)}</span>
       <CopyButton text={path} label="Copy path" size={13} className="size-5 shrink-0" />
     </div>
@@ -331,7 +331,7 @@ function PlanList({ input }: { input: unknown }) {
   const items = (Array.isArray(o.todos) ? o.todos : Array.isArray(o.items) ? o.items : Array.isArray(o.plan) ? o.plan : []) as unknown[];
   if (!items.length) return null;
   return (
-    <ul className="space-y-1 rounded-xl bg-raised/60 px-3 py-2.5 text-[13px]">
+    <ul className="space-y-1 rounded-xl bg-raised/60 px-3 py-2.5 text-[12.5px]">
       {items.map((it, i) => {
         const x = asObj(it);
         const status = String(x.status ?? '');
@@ -427,12 +427,12 @@ function CallDetail({ block, result, ctx }: { block: ToolUseBlock; result?: Tool
       return (
         <>
           {typeof o.url === 'string' && (
-            <a href={o.url} target="_blank" rel="noopener noreferrer nofollow" className="block truncate text-[12.5px] text-accent hover:underline">
+            <a href={o.url} target="_blank" rel="noopener noreferrer nofollow" className="block truncate text-[12px] text-accent hover:underline">
               {o.url}
             </a>
           )}
-          {typeof o.query === 'string' && <div className="text-[13px] text-ink">“{o.query}”</div>}
-          {typeof o.prompt === 'string' && <div className="text-[12.5px] text-muted">{o.prompt}</div>}
+          {typeof o.query === 'string' && <div className="text-[12.5px] text-ink">“{o.query}”</div>}
+          {typeof o.prompt === 'string' && <div className="text-[12px] text-muted">{o.prompt}</div>}
           {output}
         </>
       );
@@ -443,18 +443,18 @@ function CallDetail({ block, result, ctx }: { block: ToolUseBlock; result?: Tool
             <button
               type="button"
               onClick={() => ctx.onOpenSubSession!(block.subSessionId!)}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-accent-soft px-2.5 py-1.5 text-[12.5px] font-medium text-accent hover:brightness-110"
+              className="inline-flex items-center gap-1.5 rounded-lg bg-accent-soft px-2.5 py-1.5 text-[12px] font-medium text-accent hover:brightness-110"
             >
               <Bot size={14} /> Open this agent’s run
               <ChevronRight size={13} />
             </button>
           )}
           {typeof o.prompt === 'string' && (
-            <Disclosure summary="Instructions it was given">{() => <div className="rounded-xl bg-raised/60 px-4 py-3 [&_.prose-msg]:text-[13.5px]"><Markdown text={o.prompt as string} /></div>}</Disclosure>
+            <Disclosure summary="Instructions it was given">{() => <div className="rounded-xl bg-raised/60 px-4 py-3 [&_.prose-msg]:text-[13px]"><Markdown text={o.prompt as string} /></div>}</Disclosure>
           )}
           {result && out && (
-            <div className="rounded-xl border border-line px-4 py-3 [&_.prose-msg]:text-[13.5px]">
-              <div className="mb-1.5 text-[11.5px] font-medium text-faint">What it reported back</div>
+            <div className="rounded-xl border border-line px-4 py-3 [&_.prose-msg]:text-[13px]">
+              <div className="mb-1.5 text-[11px] font-medium text-faint">What it reported back</div>
               <Markdown text={out} />
             </div>
           )}
@@ -467,7 +467,7 @@ function CallDetail({ block, result, ctx }: { block: ToolUseBlock; result?: Tool
       const { server } = toolName(block.name);
       return (
         <>
-          {server && <div className="text-[12px] text-faint">{serverLabel(block.name)} · {toolName(block.name).name}</div>}
+          {server && <div className="text-[11.5px] text-faint">{serverLabel(block.name)} · {toolName(block.name).name}</div>}
           <JsonInput input={block.input} />
           {output}
           {extras}
@@ -489,7 +489,7 @@ export function BlockView({ block, ctx }: { block: Block; ctx: BlockCtx }): Reac
       return (
         <div className="flex gap-2.5 px-3 py-2">
           <Brain size={14} className="mt-[3px] shrink-0 text-faint" strokeWidth={1.9} />
-          <div className="min-w-0 flex-1 text-muted [&_.prose-msg]:text-[13.5px] [&_.prose-msg]:text-muted">
+          <div className="min-w-0 flex-1 text-muted [&_.prose-msg]:text-[13px] [&_.prose-msg]:text-muted">
             <TextView text={block.text} truncated={block.truncated} ctx={ctx} />
           </div>
         </div>
@@ -512,7 +512,7 @@ export function BlockView({ block, ctx }: { block: Block; ctx: BlockCtx }): Reac
           href={block.blobPath ? api.blobUrl(ctx.sessionId, ctx.seq, block.blobPath) : undefined}
           target="_blank"
           rel="noopener"
-          className="inline-flex items-center gap-2 rounded-xl bg-raised px-3 py-2 text-[13px] text-ink hover:bg-raised-2"
+          className="inline-flex items-center gap-2 rounded-xl bg-raised px-3 py-2 text-[12.5px] text-ink hover:bg-raised-2"
         >
           <FileText size={15} className="text-muted" /> {block.title ?? 'Document'} <span className="text-faint">{bytes(block.size)}</span>
         </a>
@@ -523,7 +523,7 @@ export function BlockView({ block, ctx }: { block: Block; ctx: BlockCtx }): Reac
       const Icon = block.level === 'info' ? Info : AlertTriangle;
       const color = block.level === 'error' ? 'text-error' : block.level === 'warning' ? 'text-warn' : 'text-muted';
       return (
-        <div className={`flex items-start gap-2 text-[13px] ${color}`}>
+        <div className={`flex items-start gap-2 text-[12.5px] ${color}`}>
           <Icon size={14} className="mt-[2px] shrink-0" />
           <span className="min-w-0 whitespace-pre-wrap">{block.text}</span>
         </div>

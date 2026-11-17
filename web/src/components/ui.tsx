@@ -19,7 +19,7 @@ export function IconButton({
   href?: string;
   download?: boolean;
 }) {
-  const cls = `inline-flex size-8 shrink-0 items-center justify-center rounded-lg text-muted transition-colors hover:bg-hover hover:text-ink active:bg-press ${active ? 'bg-hover text-ink' : ''} ${className}`;
+  const cls = `inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted transition-colors hover:bg-hover hover:text-ink active:bg-press ${active ? 'bg-hover text-ink' : ''} ${className}`;
   if (href)
     return (
       <a href={href} download={download} aria-label={label} title={label} className={cls}>
@@ -86,7 +86,7 @@ export function Segmented<T extends string>({
   className?: string;
 }) {
   return (
-    <div role="radiogroup" aria-label={label} className={`inline-flex rounded-lg bg-hover p-0.5 ${className}`}>
+    <div role="radiogroup" aria-label={label} className={`inline-flex rounded-[7px] bg-hover p-0.5 ${className}`}>
       {options.map((o) => (
         <button
           key={o.value}
@@ -95,7 +95,7 @@ export function Segmented<T extends string>({
           aria-checked={value === o.value}
           title={o.title}
           onClick={() => onChange(o.value)}
-          className={`inline-flex min-w-0 flex-1 items-center justify-center gap-1.5 truncate rounded-md px-2.5 py-1 text-[12.5px] font-medium transition-colors ${
+          className={`inline-flex h-6 min-w-0 flex-1 items-center justify-center gap-1.5 truncate rounded-[5px] px-2 text-[11.5px] font-medium transition-colors ${
             value === o.value ? 'bg-canvas text-ink shadow-[0_1px_2px_rgb(0_0_0/0.08),0_0_0_0.5px_var(--line)] dark:bg-raised-2' : 'text-muted hover:text-ink'
           }`}
         >

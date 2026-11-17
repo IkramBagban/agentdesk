@@ -79,7 +79,7 @@ export const CodeBlock = memo(function CodeBlock({ code, lang, bare = false, cla
   if (bare) return body;
   return (
     <div className={`code-block group/code relative !p-0 ${className}`}>
-      <div className="flex h-8 items-center justify-between pr-1.5 pl-3.5 font-sans text-[11.5px] text-faint">
+      <div className="flex h-8 items-center justify-between pr-1.5 pl-3.5 font-sans text-[11px] text-faint">
         <span>{lang ?? 'text'}</span>
         <CopyButton text={code} label="Copy code" size={14} className="opacity-60 group-hover/code:opacity-100 focus-visible:opacity-100" />
       </div>
