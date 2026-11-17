@@ -61,6 +61,7 @@ function makeStore(meta: SessionMeta): IndexStore {
     },
     getSession: (id) => (id === meta.id ? meta : undefined),
     getSubSessions: () => [],
+    getSideChats: () => [],
     listEventRefs: ({ from, limit }) => {
       const items = refs.filter((r) => r.seq >= from).slice(0, limit);
       return { items, total: refs.length };

@@ -76,7 +76,7 @@ export const api = {
   projects: (source?: string) => get<ProjectMeta[]>('/api/projects', { source }),
   sessions: (p: { source?: string; project?: string; q?: string; cursor?: string; limit?: number; tree?: boolean; archived?: ArchivedFilter }) =>
     get<Page<SessionNode>>('/api/sessions', { ...p, tree: p.tree ? 1 : undefined, limit: p.limit ?? 50 }),
-  session: (id: string) => get<SessionMeta & { subSessions: SessionMeta[] }>(`/api/sessions/${enc(id)}`),
+  session: (id: string) => get<SessionMeta & { subSessions: SessionMeta[]; sideChats: SessionMeta[] }>(`/api/sessions/${enc(id)}`),
   events: (id: string, p: { from: number; limit?: number; view: View; dir?: 'forward' | 'backward' }) =>
     get<EventPage>(`/api/sessions/${enc(id)}/events`, { from: p.from, limit: p.limit ?? 100, view: p.view, dir: p.dir }),
   outline: (id: string) => get<OutlineItem[]>(`/api/sessions/${enc(id)}/outline`),

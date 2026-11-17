@@ -6,6 +6,7 @@ import { useRoute } from './router.ts';
 import { Sidebar } from './components/Sidebar.tsx';
 import { SessionHeader } from './components/SessionHeader.tsx';
 import { Conversation } from './components/Conversation.tsx';
+import { SidePanel } from './components/SidePanel.tsx';
 import { IconButton } from './components/ui.tsx';
 
 export type ThemePref = 'system' | 'light' | 'dark';
@@ -95,16 +96,17 @@ function useLiveUpdates() {
 const DESKTOP = '(min-width: 1024px)';
 const isDesktop = () => window.matchMedia(DESKTOP).matches;
 
-function useIsDesktop() {
-  const [v, setV] = useState(isDesktop);
+function useMedia(query: string) {
+  const [v, setV] = useState(() => window.matchMedia(query).matches);
   useEffect(() => {
-    const mq = window.matchMedia(DESKTOP);
+    const mq = window.matchMedia(query);
     const on = () => setV(mq.matches);
     mq.addEventListener('change', on);
     return () => mq.removeEventListener('change', on);
-  }, []);
+  }, [query]);
   return v;
 }
+const useIsDesktop = () => useMedia(DESKTOP);
 
 export function App() {
   const route = useRoute();
@@ -113,6 +115,8 @@ export function App() {
   const [pinned, setPinned] = useState(() => readPref('agentdesk-sidebar', ['open', 'closed'] as const, 'open') === 'open');
   const [drawer, setDrawer] = useState(false);
   const desktop = useIsDesktop();
+  // Side chats sit beside the chat on wide screens and slide over it otherwise.
+  const wide = useMedia('(min-width: 1280px)');
   const status = useQuery({ queryKey: ['status'], queryFn: api.status, refetchInterval: (q) => (q.state.data?.index.state === 'indexing' ? 2000 : false) });
   useLiveUpdates();
 
@@ -176,6 +180,7 @@ export function App() {
           <Welcome onToggleSidebar={toggleSidebar} sidebarShown={pinned} sessionCount={status.data?.index.sessionCount} />
         )}
       </main>
+      {route.sessionId && route.side && <SidePanel sessionId={route.sessionId} sideId={route.side} overlay={!wide} />}
     </div>
   );
 }

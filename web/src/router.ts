@@ -8,6 +8,7 @@ import { useSyncExternalStore } from 'react';
  *   ?project=…&source=…&q=… → sidebar filters / search
  *   &seq=N                  → jump to an event
  *   &view=all               → show everything
+ *   &side=<session id>      → side chat open in the right panel
  */
 export interface Route {
   sessionId?: string;
@@ -16,6 +17,8 @@ export interface Route {
   q?: string;
   seq?: number;
   view: 'conversation' | 'all';
+  /** side chat shown in the right panel */
+  side?: string;
 }
 
 function parse(): Route {
@@ -29,6 +32,7 @@ function parse(): Route {
     q: url.searchParams.get('q') ?? undefined,
     seq: seq != null && /^\d+$/.test(seq) ? Number(seq) : undefined,
     view: url.searchParams.get('view') === 'all' ? 'all' : 'conversation',
+    side: url.searchParams.get('side') ?? undefined,
   };
 }
 
@@ -40,6 +44,7 @@ function build(r: Route): string {
   if (r.q) qs.set('q', r.q);
   if (r.seq != null) qs.set('seq', String(r.seq));
   if (r.view === 'all') qs.set('view', 'all');
+  if (r.side) qs.set('side', r.side);
   return qs.size ? `${path}?${qs}` : path;
 }
 
@@ -59,6 +64,8 @@ window.addEventListener('popstate', emit);
 
 export function navigate(patch: Partial<Route>, opts: { replace?: boolean } = {}) {
   const next = { ...current, ...patch };
+  // A side chat belongs to the chat it was opened from.
+  if (patch.sessionId !== undefined && patch.sessionId !== current.sessionId && !('side' in patch)) next.side = undefined;
   const url = build(next);
   if (opts.replace) history.replaceState(null, '', url);
   else history.pushState(null, '', url);

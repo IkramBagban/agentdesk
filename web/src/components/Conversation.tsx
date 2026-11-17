@@ -17,31 +17,44 @@ const END = 2 ** 31 - 1;
 
 type Param = { from: number; dir: 'forward' | 'backward' };
 
-export function Conversation({ sessionId, view, seq }: { sessionId: string; view: View; seq?: number }) {
-  const initial: Param = seq != null ? { from: Math.max(0, seq - 6), dir: 'forward' } : { from: 0, dir: 'forward' };
-  const [anchor, setAnchor] = useState<Param>(initial);
-  // Re-anchor when the jump target changes.
-  useEffect(() => setAnchor(initial), [sessionId, seq, view]); // eslint-disable-line react-hooks/exhaustive-deps
+/**
+ * `embedded`: shown in the side-chat panel. No minimap or j/k keys (those
+ * belong to the main chat) and jumps stay local instead of changing the URL.
+ */
+export function Conversation({ sessionId, view, seq, embedded = false }: { sessionId: string; view: View; seq?: number; embedded?: boolean }) {
+  const meta = useQuery({ queryKey: ['session', sessionId], queryFn: () => api.session(sessionId) });
+  const fromAgent = !!meta.data?.parentSessionId;
+  // A forked chat (e.g. a side chat) starts with a copy of the chat it came
+  // from; begin where it diverges. The full chat view can reveal the copy.
+  const [showInherited, setShowInherited] = useState(false);
+  const forkedAt = meta.data?.forkedAtSeq ?? 0;
+  // (a jump into the copied part, e.g. from search, shows it too)
+  const floor = showInherited || (seq != null && seq < forkedAt) ? 0 : forkedAt;
+
+  // Where loading starts: the jump target, the fork point, or (after "scroll to end") the end.
+  const [atEnd, setAtEnd] = useState(false);
+  useEffect(() => setAtEnd(false), [sessionId, seq, view]);
+  const anchor: Param = atEnd ? { from: END, dir: 'backward' } : { from: seq != null ? Math.max(floor, seq - 6) : floor, dir: 'forward' };
 
   const q = useInfiniteQuery({
     queryKey: ['events', sessionId, view, anchor.from, anchor.dir],
     initialPageParam: anchor,
     queryFn: ({ pageParam }) => api.events(sessionId, { from: pageParam.from, view, limit: PAGE, dir: pageParam.dir }),
     getNextPageParam: (last): Param | undefined => (last.nextFrom != null ? { from: last.nextFrom, dir: 'forward' } : undefined),
-    getPreviousPageParam: (first): Param | undefined => (first.prevFrom != null ? { from: first.prevFrom, dir: 'backward' } : undefined),
+    getPreviousPageParam: (first): Param | undefined => (first.prevFrom != null && first.prevFrom > floor ? { from: first.prevFrom, dir: 'backward' } : undefined),
     staleTime: 30_000,
+    // the fork point comes from the session record
+    enabled: !meta.isPending,
   });
 
   const events = useMemo(() => {
     const seen = new Set<number>();
     const out: ChatEvent[] = [];
-    for (const p of q.data?.pages ?? []) for (const e of p.items) if (!seen.has(e.seq)) (seen.add(e.seq), out.push(e));
+    for (const p of q.data?.pages ?? []) for (const e of p.items) if (e.seq >= floor && !seen.has(e.seq)) (seen.add(e.seq), out.push(e));
     return out.sort((a, b) => a.seq - b.seq);
-  }, [q.data]);
+  }, [q.data, floor]);
   const rows = useMemo(() => buildRows(events), [events]);
-
-  const meta = useQuery({ queryKey: ['session', sessionId], queryFn: () => api.session(sessionId) });
-  const fromAgent = !!meta.data?.parentSessionId;
+  const inheritedNote = !embedded && floor > 0 && !q.hasPreviousPage;
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const v = useVirtualizer({
@@ -50,7 +63,7 @@ export function Conversation({ sessionId, view, seq }: { sessionId: string; view
     estimateSize: (i) => estimate(rows[i]!),
     overscan: 6,
     getItemKey: (i) => rows[i]!.key,
-    paddingStart: 8,
+    paddingStart: inheritedNote ? 64 : 8,
     paddingEnd: 120,
   });
 
@@ -147,21 +160,22 @@ export function Conversation({ sessionId, view, seq }: { sessionId: string; view
     (target: number) => {
       const idx = rows.findIndex((r) => rowSeqs(r).includes(target));
       if (idx >= 0) v.scrollToIndex(idx, { align: 'start', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
-      else navigate({ seq: target }, { replace: true });
+      else if (!embedded) navigate({ seq: target }, { replace: true });
     },
-    [rows, v],
+    [rows, v, embedded],
   );
 
   const toBottom = () => {
     if (q.hasNextPage) {
       landedEnd.current = false;
-      navigate({ seq: undefined }, { replace: true });
-      setAnchor({ from: END, dir: 'backward' });
+      if (!embedded) navigate({ seq: undefined }, { replace: true });
+      setAtEnd(true);
     } else pinBottom();
   };
 
   // j / k move between prompts.
   useEffect(() => {
+    if (embedded) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.metaKey || e.ctrlKey || e.altKey) return;
       if (e.key !== 'j' && e.key !== 'k') return;
@@ -176,10 +190,10 @@ export function Conversation({ sessionId, view, seq }: { sessionId: string; view
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [rows, v]);
+  }, [rows, v, embedded]);
 
   if (q.isError) return <Empty title="This chat couldn’t be loaded" body={(q.error as Error).message} />;
-  if (q.isLoading) return <LoadingChat />;
+  if (q.isPending) return <LoadingChat />;
   if (!rows.length)
     return <Empty title="Nothing to show in this view" body={view === 'conversation' ? 'Switch to “Everything” to see background records.' : 'This chat file has no readable records.'} />;
 
@@ -189,11 +203,22 @@ export function Conversation({ sessionId, view, seq }: { sessionId: string; view
     <>
       <div ref={scrollRef} onScroll={onScroll} className="scroll-quiet relative h-full overflow-y-auto [overflow-anchor:none]" data-testid="conversation">
         <div style={{ height: v.getTotalSize(), position: 'relative' }}>
+          {inheritedNote && (
+            <div className="absolute top-0 left-0 w-full">
+              <div className="mx-auto flex max-w-[760px] items-center gap-3 px-5 pt-5 text-[12px] text-faint sm:px-8 md:px-10">
+                <span className="h-px flex-1 bg-line" />
+                <button type="button" onClick={() => setShowInherited(true)} className="rounded-md px-2 py-1 transition-colors hover:bg-hover hover:text-ink">
+                  Started from another chat · show the earlier messages
+                </button>
+                <span className="h-px flex-1 bg-line" />
+              </div>
+            </div>
+          )}
           {items.map((it) => {
             const row = rows[it.index]!;
             return (
               <div key={it.key} data-index={it.index} ref={v.measureElement} className="absolute top-0 left-0 w-full" style={{ transform: `translateY(${it.start}px)` }}>
-                <div className="mx-auto max-w-[760px] px-5 sm:px-8 md:px-10">
+                <div className={embedded ? 'px-4 sm:px-5' : 'mx-auto max-w-[760px] px-5 sm:px-8 md:px-10'}>
                   <RowView row={row} ctxBase={ctxBase} fromAgent={fromAgent} showInjected={view === 'all'} highlight={seq != null && rowSeqs(row).includes(seq)} />
                 </div>
               </div>
@@ -201,7 +226,7 @@ export function Conversation({ sessionId, view, seq }: { sessionId: string; view
           })}
         </div>
       </div>
-      <Minimap sessionId={sessionId} current={currentSeq} onJump={jumpTo} />
+      {!embedded && <Minimap sessionId={sessionId} current={currentSeq} onJump={jumpTo} />}
       {(!nearEnd || q.hasNextPage) && (
         <button
           type="button"

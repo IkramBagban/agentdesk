@@ -196,7 +196,7 @@ export function createApp(deps: AppDeps): Hono {
     const id = c.req.param('id');
     const meta = store.getSession(id);
     if (!meta) return fail(c, 404, 'session not found');
-    return c.json({ ...meta, subSessions: store.getSubSessions(id) });
+    return c.json({ ...meta, subSessions: store.getSubSessions(id), sideChats: store.getSideChats(id) });
   });
 
   app.get('/api/sessions/:id/outline', (c) => {

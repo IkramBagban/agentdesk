@@ -36,6 +36,8 @@ export interface IndexStore {
 
   getSession(id: string): SessionMeta | undefined;
   getSubSessions(parentId: string): SessionMeta[];
+  /** side chats (spawnKind 'side') started from this session, oldest first */
+  getSideChats(parentId: string): SessionMeta[];
 
   /**
    * Locations of events to read, in seq order. The server reads the byte

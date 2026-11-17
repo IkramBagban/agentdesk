@@ -72,6 +72,7 @@ beforeAll(() => {
     listSessions: () => ({ items: [{ ...meta, children: [] }] }),
     getSession: (id) => (id === meta.id ? meta : undefined),
     getSubSessions: () => [],
+    getSideChats: () => [],
     listEventRefs: () => ({ items: refs, total: refs.length }),
     getEventRef: (_id, seq) => refs.find((r) => r.seq === seq),
     toolLinks: () => new Map(),

@@ -19,7 +19,7 @@ const RANK_BOOST = `(CASE WHEN e.visibility = 'detail' THEN 1.0 WHEN e.role = 'u
 
 const SESSION_COLS = `id, source_id, native_id, file_path, project_key, project_path, title, first_prompt, started_at,
   updated_at, event_count, message_count, image_count, models, cost_usd, input_tokens, output_tokens, git_branch,
-  parent_session_id, parent_tool_use_id, agent_description, links`;
+  parent_session_id, parent_tool_use_id, agent_description, links, forked_at_seq`;
 
 const optStr = (v: unknown): string | undefined => (v == null || v === '' ? undefined : String(v));
 const optNum = (v: unknown): number | undefined => (v == null ? undefined : Number(v));
@@ -60,6 +60,7 @@ function rowToSession(r: Row): SessionMeta {
   set('parentSessionId', optStr(r.parent_session_id));
   set('parentToolUseId', optStr(r.parent_tool_use_id));
   set('agentDescription', optStr(r.agent_description));
+  set('forkedAtSeq', optNum(r.forked_at_seq));
   return s;
 }
 
@@ -391,6 +392,14 @@ export class SqliteIndexStore implements IndexStore {
       .all(parentId) as Row[];
     const g = this.graph();
     return rows.map((r) => this.overlay(rowToSession(r), g));
+  }
+
+  getSideChats(parentId: string): SessionMeta[] {
+    const g = this.graph();
+    const ids: string[] = [];
+    for (const n of g.nodes.values()) if (n.parentId === parentId && n.spawnKind === 'side') ids.push(n.id);
+    const rows = this.fullRows(ids, g);
+    return [...rows.values()].sort((a, b) => (a.startedAt ?? '').localeCompare(b.startedAt ?? '') || a.id.localeCompare(b.id));
   }
 
   listEventRefs(opts: {

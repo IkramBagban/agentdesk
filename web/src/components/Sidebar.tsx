@@ -234,10 +234,16 @@ function useInfiniteList<T>(key: unknown[], fetchPage: (cursor?: string) => Prom
   });
 }
 
+function withoutSideChats(n: SessionNode): SessionNode {
+  if (!n.children.length) return n;
+  return { ...n, children: n.children.filter((c) => c.spawnKind !== 'side').map(withoutSideChats) };
+}
+
 function useSessions(archived: ArchivedFilter) {
   const route = useRoute();
   const q = useInfiniteList(['sessions', route.source, route.project, 'tree', archived], (cursor) => api.sessions({ source: route.source, project: route.project, cursor, tree: true, archived }));
-  const items = useMemo(() => q.data?.pages.flatMap((p) => p.items) ?? [], [q.data]);
+  // Side chats live in the panel beside their chat, not in the list.
+  const items = useMemo(() => (q.data?.pages.flatMap((p) => p.items) ?? []).map(withoutSideChats), [q.data]);
   const loadMore = useCallback(() => {
     if (q.hasNextPage && !q.isFetchingNextPage) void q.fetchNextPage();
   }, [q]);

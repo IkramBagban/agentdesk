@@ -1,15 +1,22 @@
 import type { ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Bot, ChevronLeft, Download, ExternalLink, GitBranch, GitPullRequest, Info, PanelLeft } from 'lucide-react';
+import { Bot, ChevronLeft, Download, ExternalLink, GitBranch, GitPullRequest, Info, MessagesSquare, PanelLeft } from 'lucide-react';
 import { api, type View } from '../api.ts';
-import { navigate } from '../router.ts';
+import { navigate, useRoute } from '../router.ts';
+import { sideChatLabel } from './SidePanel.tsx';
 import { fullDate, plural, projectLabel, projectName, relDate, sourceLabel, tildify, tokens, usd } from '../format.ts';
 import { CopyButton, IconButton, Popover, Segmented } from './ui.tsx';
 
 export function SessionHeader({ sessionId, view, onToggleSidebar, sidebarShown }: { sessionId: string; view: View; onToggleSidebar: () => void; sidebarShown: boolean }) {
   const q = useQuery({ queryKey: ['session', sessionId], queryFn: () => api.session(sessionId) });
   const s = q.data;
-  const parent = useQuery({ queryKey: ['session', s?.parentSessionId], queryFn: () => api.session(s!.parentSessionId!), enabled: !!s?.parentSessionId });
+  const route = useRoute();
+  // Sub-agent runs and side chats link back to the chat they came from.
+  const sideOf = s?.spawnKind === 'side' ? s.spawnedFromSessionId : undefined;
+  const backTo = s?.parentSessionId ?? sideOf;
+  const parent = useQuery({ queryKey: ['session', backTo], queryFn: () => api.session(backTo!), enabled: !!backTo });
+  const sides = s?.sideChats ?? [];
+  const sideOpen = !!route.side;
   const title = s ? s.agentDescription || s.title || s.firstPrompt || 'Untitled chat' : '';
   const meta = s ? [projectLabel(s), sourceLabel(s.sourceId), relDate(s.startedAt)].filter(Boolean).join(' · ') : '';
 
@@ -21,8 +28,8 @@ export function SessionHeader({ sessionId, view, onToggleSidebar, sidebarShown }
         </IconButton>
       </span>
       <div className="min-w-0 flex-1 px-1">
-        {s?.parentSessionId && (
-          <button type="button" onClick={() => navigate({ sessionId: s.parentSessionId, seq: undefined })} className="-ml-0.5 flex max-w-full items-center gap-0.5 text-[11.5px] text-muted hover:text-ink">
+        {backTo && (
+          <button type="button" onClick={() => navigate({ sessionId: backTo, seq: undefined, side: sideOf ? s!.id : undefined })} className="-ml-0.5 flex max-w-full items-center gap-0.5 text-[11.5px] text-muted hover:text-ink">
             <ChevronLeft size={13} className="shrink-0" />
             <span className="truncate">{parent.data?.title ?? 'Main chat'}</span>
           </button>
@@ -31,7 +38,7 @@ export function SessionHeader({ sessionId, view, onToggleSidebar, sidebarShown }
           {s?.parentSessionId && <Bot size={15} className="shrink-0 text-muted" />}
           <span className="truncate">{title || ' '}</span>
         </h1>
-        {!s?.parentSessionId && <p className="mt-0.5 truncate text-[12px] text-muted max-sm:hidden">{meta || ' '}</p>}
+        {!backTo && <p className="mt-0.5 truncate text-[12px] text-muted max-sm:hidden">{meta || ' '}</p>}
       </div>
       <Segmented
         label="What to show"
@@ -42,6 +49,19 @@ export function SessionHeader({ sessionId, view, onToggleSidebar, sidebarShown }
           { value: 'all', label: <><span className="sm:hidden">All</span><span className="max-sm:hidden">Everything</span></>, title: 'Also show background records the app added' },
         ]}
       />
+      {sides.length > 0 && (
+        <button
+          type="button"
+          onClick={() => navigate({ side: sideOpen ? undefined : sides.at(-1)!.id }, { replace: true })}
+          aria-pressed={sideOpen}
+          title={sideOpen ? 'Hide side chats' : `Side chats: ${sides.map(sideChatLabel).join(', ')}`}
+          className={`inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg px-2 text-[12.5px] transition-colors hover:bg-hover hover:text-ink active:bg-press ${sideOpen ? 'bg-hover text-ink' : 'text-muted'}`}
+        >
+          <MessagesSquare size={16} />
+          <span className="tabular-nums">{sides.length}</span>
+          <span className="max-md:hidden">{sides.length === 1 ? 'side chat' : 'side chats'}</span>
+        </button>
+      )}
       {s && (
         <Popover
           label="About this chat"
