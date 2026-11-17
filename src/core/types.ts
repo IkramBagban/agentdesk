@@ -152,6 +152,13 @@ export interface ChatEvent {
   offBranch?: boolean;
   /** user message produced by the harness, not typed by a human */
   synthetic?: boolean;
+  /**
+   * true if the source record was copied from another session (the history a
+   * fork / side chat starts with). Adapters set it only when the record names
+   * its session and that is not this one; unset otherwise. The indexer derives
+   * `SessionMeta.forkedAtSeq` from it.
+   */
+  inherited?: boolean;
   blocks: Block[];
   /** location in the source file (used by the server for random access) */
   line: number;
@@ -199,6 +206,12 @@ export interface SessionMeta {
   spawnKind?: 'spawned' | 'side';
   /** archived in the agent's own app */
   archived?: boolean;
+  /**
+   * Set when the file starts with records copied from another session (a
+   * fork / side chat): seq of the first event that belongs to this session.
+   * Events before it are the inherited history.
+   */
+  forkedAtSeq?: number;
   parentToolUseId?: string;
   agentDescription?: string;
   /** e.g. links to PRs / artifacts produced in the session */

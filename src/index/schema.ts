@@ -6,7 +6,7 @@ import { DatabaseSync } from 'node:sqlite';
  * Bump when ANY table layout or the way rows are derived changes. A mismatch
  * deletes the database file and rebuilds from scratch.
  */
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 const DDL = `
 CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL);
@@ -48,7 +48,8 @@ CREATE TABLE IF NOT EXISTS sessions (
   parent_session_id  TEXT,
   parent_tool_use_id TEXT,
   agent_description  TEXT,
-  links              TEXT NOT NULL DEFAULT '[]'
+  links              TEXT NOT NULL DEFAULT '[]',
+  forked_at_seq      INTEGER             -- SessionMeta.forkedAtSeq, derived from events.inherited
 );
 CREATE INDEX IF NOT EXISTS sessions_updated ON sessions(updated_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS sessions_project ON sessions(project_key, updated_at DESC);
@@ -70,6 +71,7 @@ CREATE TABLE IF NOT EXISTS events (
   ts             TEXT,
   off_branch     INTEGER NOT NULL DEFAULT 0,
   synthetic      INTEGER NOT NULL DEFAULT 0,
+  inherited      INTEGER NOT NULL DEFAULT 0,  -- ChatEvent.inherited (copied from another session)
   preview        TEXT,               -- 'conversation' events only (outline, snippet fallback)
   dkey           INTEGER             -- copy-detection key (hash of source + record uuid + index in line); see search()
 );

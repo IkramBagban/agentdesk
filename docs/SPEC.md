@@ -53,7 +53,7 @@ to `dist/web/`.
   `custom-title`, `agent-name`, `last-prompt` (has `leafUuid`), `cost-state`,
   `pr-link`, `frame-link`, `summary`, plus pure bookkeeping
   (`api-request*`, `queue-operation`, `file-history-*`, `mode`,
-  `permission-mode`, `atis-latch`, `bridge-session`, `relocated`,
+  `permission-mode`, `atis-latch`, `isolation-latch`, `bridge-session`, `relocated`,
   `tools-used`, `artifact-*`).
 - `message.content` is a string or a block array: text, thinking, tool_use,
   tool_result (content string or array of text/image/document/tool_reference),
@@ -65,6 +65,15 @@ to `dist/web/`.
   synthetic → visibility `meta`.
 - Bookkeeping records produce **no events** but update SessionMeta
   (title, cost, links, models).
+- Forks / side chats: the new file first holds copies of the parent's
+  records, which keep the parent's `sessionId`. Events from a record whose
+  `sessionId` is not the file's own (the file stem; for sub-agent files the
+  parent session id, which their records carry) get `ChatEvent.inherited =
+  true`. Records without `sessionId` (e.g. file-history-snapshot) never do.
+  The indexer sets `SessionMeta.forkedAtSeq` = seq of the first non-inherited
+  event when the session's first event is inherited; it stays unset while a
+  fork has only copied history, and is recomputed from stored rows after
+  every (incremental) pass.
 
 ## Codex format notes (adapter)
 
@@ -86,8 +95,8 @@ Contains a `schema_version`; on mismatch the DB is deleted and rebuilt.
 
 Tables (indicative):
 - `files(path PK, source_id, size, mtime_ms, indexed_size, indexed_lines, tail_hash, sidecar_mtime, parser_state JSON, parser_version, error_count, error)`
-- `sessions(id PK, source_id, native_id, file_path, project_key, project_path, title, first_prompt, started_at, updated_at, event_count, message_count, image_count, models JSON, cost_usd, input_tokens, output_tokens, git_branch, parent_session_id, parent_tool_use_id, agent_description, links JSON)`
-- `events(id, session_id, seq, line, line_first_seq, offset, length, role, visibility, synthetic, ts, off_branch, preview, dkey)`
+- `sessions(id PK, source_id, native_id, file_path, project_key, project_path, title, first_prompt, started_at, updated_at, event_count, message_count, image_count, models JSON, cost_usd, input_tokens, output_tokens, git_branch, parent_session_id, parent_tool_use_id, agent_description, links JSON, forked_at_seq)`
+- `events(id, session_id, seq, line, line_first_seq, offset, length, role, visibility, synthetic, inherited, ts, off_branch, preview, dkey)`
   — `preview` only for conversation events (outline, snippet fallback);
   `dkey` = 64-bit hash of (source, record uuid, index within line), used to
   collapse copies of the same record across forked/resumed sessions.

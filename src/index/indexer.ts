@@ -102,8 +102,8 @@ interface Stmts {
 function prepare(db: DatabaseSync): Stmts {
   return {
     insEvent: db.prepare(
-      `INSERT INTO events(session_id, seq, line, offset, length, line_first_seq, role, visibility, ts, off_branch, synthetic, preview, dkey)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+      `INSERT INTO events(session_id, seq, line, offset, length, line_first_seq, role, visibility, ts, off_branch, synthetic, inherited, preview, dkey)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`,
     ),
     insFts: db.prepare('INSERT INTO events_fts(rowid, text) VALUES (?, ?)'),
     insLink: db.prepare(
@@ -280,6 +280,7 @@ export async function indexFile(
             ev.visibility,
             ev.timestamp ?? null,
             ev.synthetic ? 1 : 0,
+            ev.inherited ? 1 : 0,
             d.preview,
             dedupeKey(adapter.id, ev, ev.seq - firstSeq),
           );
@@ -382,12 +383,13 @@ function finalizeSession(
   const parentSessionId =
     meta.parentSessionId ?? (file.parentNativeId ? `${adapter.id}:${file.parentNativeId}` : undefined);
   const updatedAt = meta.updatedAt ?? meta.startedAt ?? new Date(mtimeMs).toISOString();
+  const forkedAtSeq = meta.forkedAtSeq ?? forkPoint(db, id);
 
   db.prepare(
     `INSERT OR REPLACE INTO sessions(id, source_id, native_id, file_path, project_key, project_path, title, first_prompt,
        started_at, updated_at, event_count, message_count, image_count, models, cost_usd, input_tokens, output_tokens,
-       git_branch, parent_session_id, parent_tool_use_id, agent_description, links)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       git_branch, parent_session_id, parent_tool_use_id, agent_description, links, forked_at_seq)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     id,
     meta.sourceId ?? adapter.id,
@@ -411,6 +413,7 @@ function finalizeSession(
     meta.parentToolUseId ?? null,
     meta.agentDescription ?? null,
     JSON.stringify(meta.links ?? []),
+    forkedAtSeq ?? null,
   );
 
   // branch info is recomputed over the whole session every time
@@ -424,6 +427,26 @@ function finalizeSession(
     stmts(db).insLink.run(parentSessionId, meta.parentToolUseId, id, 'sub');
   }
   return id;
+}
+
+/**
+ * SessionMeta.forkedAtSeq: seq of the first event of this session's own,
+ * provided an inherited (copied) event comes before it. Computed from the
+ * stored rows, so it is right after a resume too: the inherited prefix may
+ * have been indexed in an earlier pass, and a fork whose own events have not
+ * been written yet has none.
+ */
+function forkPoint(db: DatabaseSync, sessionId: string): number | undefined {
+  // events before the first one with inherited = 0 are all inherited, so this
+  // equals "first own seq, if some inherited event precedes it"
+  const first = db
+    .prepare('SELECT inherited FROM events WHERE session_id = ? ORDER BY seq LIMIT 1')
+    .get(sessionId) as Row | undefined;
+  if (!first || Number(first.inherited) !== 1) return undefined;
+  const own = db
+    .prepare('SELECT seq FROM events WHERE session_id = ? AND inherited = 0 ORDER BY seq LIMIT 1')
+    .get(sessionId) as Row | undefined;
+  return own ? Number(own.seq) : undefined;
 }
 
 // ---------------------------------------------------------------------------

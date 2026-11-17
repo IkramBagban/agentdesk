@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import type { DiscoveredFile, SessionParser } from '../../core/adapter.ts';
 import type { ChatEvent, RawLine, SessionMeta } from '../../core/types.ts';
-import { convertRecord, countImages, materialize, parseJson, textOf } from './convert.ts';
+import { convertRecord, countImages, isInherited, materialize, parseJson, textOf } from './convert.ts';
 import { clip, isObj, num, type Rec, str } from './util.ts';
 
 const SOURCE = 'claude-code';
@@ -82,7 +82,7 @@ export class ClaudeCodeParser implements SessionParser {
     }
     const drafts = convertRecord(rec);
     this.observe(rec);
-    const events = materialize(drafts, this.st.seq, line);
+    const events = materialize(drafts, this.st.seq, line, isInherited(rec, this.file));
     for (const ev of events) this.account(ev);
     return events;
   }

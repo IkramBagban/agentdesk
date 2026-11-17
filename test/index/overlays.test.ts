@@ -4,7 +4,7 @@
  */
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join, normalize, resolve } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { claudeCodeAdapter } from '../../src/adapters/claude-code/index.ts';
@@ -20,6 +20,8 @@ import { buildGraph } from '../../src/index/tree.ts';
 import { fakeAdapter } from './fake-adapter.ts';
 
 const L = (o: object) => JSON.stringify(o);
+/** project key the indexer derives for a folder (backslashes on Windows, see projectKeyFor) */
+const pathKey = (p: string) => `path:${normalize(p)}`;
 
 let dir: string;
 let root: string;
@@ -180,14 +182,14 @@ describe('tree listing', () => {
     overlays.set('appwt', { projectPath: '/w/repo' });
     await run();
     const projects = store.listProjects({});
-    expect(projects.map((p) => [p.key, p.sessionCount])).toEqual([['path:/w/repo', 5]]);
-    const items = tree({ projectKey: 'path:/w/repo' }).items;
+    expect(projects.map((p) => [p.key, p.sessionCount])).toEqual([[pathKey('/w/repo'), 5]]);
+    const items = tree({ projectKey: pathKey('/w/repo') }).items;
     expect(shape(items)).toEqual(['appwt', { main: ['elsewhere', 'wt'] }, 'lone']);
-    expect(items.every((n) => n.projectKey === 'path:/w/repo')).toBe(true);
+    expect(items.every((n) => n.projectKey === pathKey('/w/repo'))).toBe(true);
     // the child keeps its own folder as projectPath
     expect(store.getSession('fake:elsewhere')!.projectPath).toBe('/w/elsewhere');
-    expect(store.getSession('fake:elsewhere')!.projectKey).toBe('path:/w/repo');
-    expect(tree({ projectKey: 'path:/w/elsewhere' }).items).toEqual([]);
+    expect(store.getSession('fake:elsewhere')!.projectKey).toBe(pathKey('/w/repo'));
+    expect(tree({ projectKey: pathKey('/w/elsewhere') }).items).toEqual([]);
   });
 
   it('re-reads overlays without re-parsing chat files', async () => {
@@ -334,7 +336,7 @@ describe('Claude app session files', () => {
 
     await index();
     // no app folder: B is grouped under the repo by its worktree path alone, as a root
-    expect(store.listProjects({}).map((p) => [p.key, p.sessionCount])).toEqual([['path:/w/repo', 2]]);
+    expect(store.listProjects({}).map((p) => [p.key, p.sessionCount])).toEqual([[pathKey('/w/repo'), 2]]);
     expect(tree().items.map((n) => n.nativeId)).toEqual([B, A]);
 
     write('acct', 'org', 'local_a.json', rec('a', A, { title: 'Main task' }));
@@ -371,7 +373,13 @@ describe('Claude app session files', () => {
       ix.store.onChange((e) => {
         if (e.type === 'session-updated') updates.push(e.sessionId);
       });
-      await new Promise((r) => setTimeout(r, 200)); // let the watcher settle
+      // let the watchers settle: on Windows, reading the chat files during the first scan can itself
+      // raise (access-time) events, and the chat watcher fires a no-op pass after its 500ms debounce
+      await new Promise((r) => setTimeout(r, 1500));
+      const passes: unknown[] = [];
+      ix.store.onChange((e) => {
+        if (e.type === 'progress') passes.push(e.status);
+      });
       write('acct', 'org', 'local_a.json', rec('a', A, { title: 'After', isArchived: true }));
       const deadline = Date.now() + 10000;
       while (Date.now() < deadline && !updates.length) await new Promise((r) => setTimeout(r, 50));
@@ -379,7 +387,7 @@ describe('Claude app session files', () => {
       const s = ix.store.getSession(`claude-code:${A}`)!;
       expect(s.title).toBe('After');
       expect(s.archived).toBe(true);
-      expect(ix.store.status().filesDone).toBe(1); // no chat re-index was triggered
+      expect(passes).toEqual([]); // no chat indexing pass was triggered by the app-folder change
     } finally {
       await ix.stop();
     }

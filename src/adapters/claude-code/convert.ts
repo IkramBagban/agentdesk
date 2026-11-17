@@ -31,6 +31,7 @@ const BOOKKEEPING = new Set([
   'mode',
   'permission-mode',
   'atis-latch',
+  'isolation-latch',
   'bridge-session',
   'relocated',
   'tools-used',
@@ -602,9 +603,24 @@ export function materialize(
   drafts: Draft[],
   firstSeq: number,
   loc: { line: number; offset: number; length: number },
+  inherited = false,
 ): ChatEvent[] {
   return drafts.map((d, i) => {
     assignBlobPaths(d.blocks);
-    return { seq: firstSeq + i, ...d, line: loc.line, offset: loc.offset, length: loc.length };
+    const ev: ChatEvent = { seq: firstSeq + i, ...d, line: loc.line, offset: loc.offset, length: loc.length };
+    if (inherited) ev.inherited = true;
+    return ev;
   });
+}
+
+/**
+ * True if the record was copied from another session. A fork / side chat file
+ * starts with the parent's records, which keep the parent's `sessionId`.
+ * Sub-agent files carry the id of the session that ran them (their
+ * `parentNativeId`), so that is their own id. Records without a `sessionId`
+ * (e.g. file-history-snapshot) are never inherited.
+ */
+export function isInherited(rec: Rec, file: { nativeId: string; parentNativeId?: string }): boolean {
+  const sid = str(rec.sessionId);
+  return sid !== undefined && sid !== (file.parentNativeId ?? file.nativeId);
 }
