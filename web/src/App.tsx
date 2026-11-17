@@ -6,7 +6,7 @@ import { useRoute } from './router.ts';
 import { Sidebar } from './components/Sidebar.tsx';
 import { SessionHeader } from './components/SessionHeader.tsx';
 import { Conversation } from './components/Conversation.tsx';
-import { SidePanel } from './components/SidePanel.tsx';
+import { SidePanel, useSideLayout } from './components/SidePanel.tsx';
 import { IconButton } from './components/ui.tsx';
 
 export type ThemePref = 'system' | 'light' | 'dark';
@@ -115,8 +115,8 @@ export function App() {
   const [pinned, setPinned] = useState(() => readPref('agentdesk-sidebar', ['open', 'closed'] as const, 'open') === 'open');
   const [drawer, setDrawer] = useState(false);
   const desktop = useIsDesktop();
-  // Side chats sit beside the chat on wide screens and slide over it otherwise.
-  const wide = useMedia('(min-width: 1280px)');
+  const sideOpen = !!(route.sessionId && route.side);
+  const side = useSideLayout(sideOpen, pinned);
   const status = useQuery({ queryKey: ['status'], queryFn: api.status, refetchInterval: (q) => (q.state.data?.index.state === 'indexing' ? 2000 : false) });
   useLiveUpdates();
 
@@ -163,7 +163,7 @@ export function App() {
       </div>
       {drawer && <div className="fixed inset-0 z-30 bg-black/40 backdrop-blur-[1px] lg:hidden" onClick={() => setDrawer(false)} aria-hidden />}
 
-      <main className="flex min-w-0 flex-1 flex-col">
+      <main className={`min-w-0 flex-1 flex-col ${sideOpen && side.presentation === 'full' ? 'hidden' : 'flex'}`}>
         {route.sessionId ? (
           <>
             <SessionHeader sessionId={route.sessionId} view={route.view} onToggleSidebar={toggleSidebar} sidebarShown={pinned} />
@@ -180,7 +180,7 @@ export function App() {
           <Welcome onToggleSidebar={toggleSidebar} sidebarShown={pinned} sessionCount={status.data?.index.sessionCount} />
         )}
       </main>
-      {route.sessionId && route.side && <SidePanel sessionId={route.sessionId} sideId={route.side} overlay={!wide} />}
+      {sideOpen && <SidePanel sessionId={route.sessionId!} sideId={route.side!} layout={side} />}
     </div>
   );
 }
@@ -188,7 +188,7 @@ export function App() {
 function Welcome({ onToggleSidebar, sidebarShown, sessionCount }: { onToggleSidebar: () => void; sidebarShown: boolean; sessionCount?: number }) {
   return (
     <div className="flex h-full flex-col">
-      <div className={`flex h-[52px] shrink-0 items-center px-3 ${sidebarShown ? 'lg:hidden' : ''}`}>
+      <div className={`flex h-12 shrink-0 items-center px-3 ${sidebarShown ? 'lg:hidden' : ''}`}>
         <IconButton label="Show sidebar" onClick={onToggleSidebar}>
           <PanelLeft size={18} />
         </IconButton>
@@ -198,11 +198,11 @@ function Welcome({ onToggleSidebar, sidebarShown, sessionCount }: { onToggleSide
           <div className="mx-auto mb-5 flex size-12 items-center justify-center rounded-2xl bg-ink text-canvas">
             <Layers size={22} strokeWidth={2} />
           </div>
-          <h1 className="text-[22px] font-semibold tracking-[-0.01em]">Welcome to agentdesk</h1>
-          <p className="mt-2 text-[14.5px] leading-relaxed text-muted">
+          <h1 className="text-[20px] font-semibold tracking-[-0.01em]">Welcome to agentdesk</h1>
+          <p className="mt-2 text-[13.5px] leading-relaxed text-muted">
             One place for your coding agents. {sessionCount ? `${sessionCount.toLocaleString()} chats` : 'Your chats'} from Claude Code and Codex, read straight from the files on this computer. Nothing leaves it.
           </p>
-          <div className="mt-6 inline-flex flex-wrap justify-center gap-x-5 gap-y-2 text-[12.5px] text-faint">
+          <div className="mt-6 inline-flex flex-wrap justify-center gap-x-5 gap-y-2 text-[12px] text-faint">
             <span>
               <kbd>/</kbd> search
             </span>
@@ -213,7 +213,7 @@ function Welcome({ onToggleSidebar, sidebarShown, sessionCount }: { onToggleSide
               <kbd>⌘</kbd> <kbd>\</kbd> sidebar
             </span>
           </div>
-          <button type="button" onClick={onToggleSidebar} className="mt-7 rounded-full bg-ink px-4 py-2 text-[13.5px] font-medium text-canvas lg:hidden">
+          <button type="button" onClick={onToggleSidebar} className="mt-7 rounded-full bg-ink px-4 py-2 text-[13px] font-medium text-canvas lg:hidden">
             Browse chats
           </button>
         </div>
@@ -229,11 +229,11 @@ function Locked() {
         <div className="mx-auto mb-5 flex size-12 items-center justify-center rounded-2xl bg-raised text-muted">
           <Lock size={20} strokeWidth={1.75} />
         </div>
-        <h1 className="text-[20px] font-semibold tracking-[-0.01em]">Open the link from your terminal</h1>
-        <p className="mt-2 text-[14.5px] leading-relaxed text-muted">
-          This page needs the private link that <code className="rounded bg-raised px-1 py-0.5 font-mono text-[12.5px]">agentdesk</code> printed when it started. It keeps other websites and apps from reading your chats.
+        <h1 className="text-[18px] font-semibold tracking-[-0.01em]">Open the link from your terminal</h1>
+        <p className="mt-2 text-[13.5px] leading-relaxed text-muted">
+          This page needs the private link that <code className="rounded bg-raised px-1 py-0.5 font-mono text-[12px]">agentdesk</code> printed when it started. It keeps other websites and apps from reading your chats.
         </p>
-        <p className="mt-3 text-[13px] text-faint">Closed the terminal? Run the command again for a new link.</p>
+        <p className="mt-3 text-[12.5px] text-faint">Closed the terminal? Run the command again for a new link.</p>
       </div>
     </div>
   );
